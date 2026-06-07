@@ -47,3 +47,43 @@ python migrate_antigravity.py
 
 ### Paso 4: Reabrir el IDE
 Vuelve a abrir **Antigravity IDE**. ¡Listo! Todo tu historial de conversaciones y tus proyectos previos aparecerán cargados y listos en la interfaz de usuario.
+
+---
+
+## 🔌 Sincronización de Plugins de Claude
+
+Esta carpeta también incluye herramientas para portar y sincronizar los plugins oficiales de **Claude Code** para que funcionen con **Antigravity CLI** en cualquier entorno (Windows, macOS o Linux).
+
+### Instalación Directa desde Internet (Recomendado)
+
+Puedes ejecutar los instaladores directamente sin necesidad de clonar previamente el repositorio:
+
+#### Windows (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1 | iex
+```
+
+#### macOS / Linux (Bash):
+```bash
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash
+```
+
+### Ejecución Local
+
+Si prefieres ejecutar el proceso usando los scripts locales de este repositorio:
+
+#### Windows:
+```powershell
+.\sync-claude-plugins.ps1
+```
+
+#### macOS / Linux:
+```bash
+chmod +x sync-claude-plugins.sh
+./sync-claude-plugins.sh
+```
+
+### 🧠 Habilidad Automatizada (Skill)
+Ambos scripts instalan automáticamente el plugin de administración `claude-plugins-manager`. Una vez instalado, puedes pedirle a tu agente en lenguaje natural que los actualice en el futuro:
+* *"actualizar plugins"*
+* *"sincronizar plugins de Claude"*
