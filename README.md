@@ -50,40 +50,68 @@ Vuelve a abrir **Antigravity IDE**. ¡Listo! Todo tu historial de conversaciones
 
 ---
 
-## 🔌 Sincronización de Plugins de Claude
+## 🔌 Administración y Sincronización de Plugins de Claude
 
-Esta carpeta también incluye herramientas para portar y sincronizar los plugins oficiales de **Claude Code** para que funcionen con **Antigravity CLI** en cualquier entorno (Windows, macOS o Linux).
+Esta carpeta también incluye herramientas para portar y sincronizar los plugins oficiales de **Claude Code**, así como instalar plugins de desarrolladores externos, para que funcionen con **Antigravity CLI** en cualquier entorno (Windows, macOS o Linux).
 
 ### Instalación Directa desde Internet (Recomendado)
 
-Puedes ejecutar los instaladores directamente sin necesidad de clonar previamente el repositorio:
+Puedes ejecutar los instaladores directamente sin necesidad de clonar previamente el repositorio.
 
-#### Windows (PowerShell):
+#### A. Sincronizar repositorio oficial de Claude
+
+Si no especificas nada, se descargarán o actualizarán todos los plugins oficiales.
+
+**Windows (PowerShell):**
+
+> ⚠️ **Importante:** Ejecuta tu terminal de PowerShell **como Administrador** para evitar errores de permisos con Git (`fatal: detected dubious ownership in repository`).
+
 ```powershell
 irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1 | iex
 ```
 
-#### macOS / Linux (Bash):
+**macOS / Linux (Bash):**
+
 ```bash
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash
 ```
 
+#### B. Instalar un plugin externo desde Git
+
+Puedes instalar un repositorio de un desarrollador externo pasando la URL de Git como argumento.
+
+**Windows (PowerShell):**
+
+> ⚠️ **Importante:** Ejecuta tu terminal de PowerShell **como Administrador**.
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -ExternalUrl "https://github.com/usuario/repositorio-plugin.git"
+```
+
+**macOS / Linux (Bash):**
+
+```bash
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- "https://github.com/usuario/repositorio-plugin.git"
+```
+
 ### Ejecución Local
 
-Si prefieres ejecutar el proceso usando los scripts locales de este repositorio:
+Si prefieres descargar y ejecutar el proceso usando los scripts locales de este repositorio:
 
-#### Windows:
-```powershell
-.\sync-claude-plugins.ps1
-```
+#### A. Sincronizar repositorio oficial
 
-#### macOS / Linux:
-```bash
-chmod +x sync-claude-plugins.sh
-./sync-claude-plugins.sh
-```
+* **Windows (Como Administrador):** `.\sync-claude-plugins.ps1`
+* **macOS / Linux:** `chmod +x sync-claude-plugins.sh && ./sync-claude-plugins.sh`
+
+#### B. Instalar un plugin externo
+
+* **Windows (Como Administrador):** `.\sync-claude-plugins.ps1 -ExternalUrl "https://github.com/usuario/repositorio-plugin.git"`
+* **macOS / Linux:** `./sync-claude-plugins.sh "https://github.com/usuario/repositorio-plugin.git"`
 
 ### 🧠 Habilidad Automatizada (Skill)
-Ambos scripts instalan automáticamente el plugin de administración `claude-plugins-manager`. Una vez instalado, puedes pedirle a tu agente en lenguaje natural que los actualice en el futuro:
+
+Ambos scripts instalan automáticamente el plugin de administración `claude-plugins-manager`. Una vez instalado, puedes pedirle a tu agente en lenguaje natural que administre tus herramientas en el futuro:
+
 * *"actualizar plugins"*
 * *"sincronizar plugins de Claude"*
+* *"instala este plugin para el CLI: https://github.com/usuario/repositorio-plugin.git"*
