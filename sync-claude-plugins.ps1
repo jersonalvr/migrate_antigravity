@@ -1,26 +1,32 @@
 # sync-claude-plugins.ps1
-# Script to synchronize official Claude Code plugins or install external skills
+# Script to synchronize official Claude Code plugins or install external skills globally
 
 param(
-    [string]$ExternalUrl = ""
+    [string]$ExternalUrl = "",
+    [switch]$Silent
 )
 
-$RepoUrl = "https://github.com/anthropics/claude-plugins-official.git"
-$RepoPath = Join-Path $Home ".gemini\antigravity-cli\scratch\claude-plugins-official"
-$PluginsPath = Join-Path $Home ".gemini\config\plugins"
-$ScratchPath = Join-Path $Home ".gemini\antigravity-cli\scratch"
+function Write-Log {
+    param([string]$Message, [string]$Color = "White")
+    if (-not $Silent) {
+        Write-Host $Message -ForegroundColor $Color
+    }
+}
 
-# 1. Ensure the clone path exists
+$PluginsPath = Join-Path $Home ".gemini\config\plugins"
+$ScratchPath = Join-Path $Home ".gemini\scratch"
+$RepoPath = Join-Path $ScratchPath "claude-plugins-official"
+$RepoUrl = "https://github.com/anthropics/claude-plugins-official.git"
+
+# 1. Ensure paths exist
 if (-not (Test-Path $ScratchPath)) {
     New-Item -ItemType Directory -Path $ScratchPath -Force | Out-Null
 }
-
-# 2. Ensure destination plugins folder exists
 if (-not (Test-Path $PluginsPath)) {
     New-Item -ItemType Directory -Path $PluginsPath -Force | Out-Null
 }
 
-# 3. Function to install/update a plugin directory
+# 2. Function to install/update a plugin directory
 function Install-Plugin($SrcFolder) {
     $PluginName = Split-Path $SrcFolder -Leaf
     
@@ -28,7 +34,7 @@ function Install-Plugin($SrcFolder) {
     if ($PluginName -eq "example-plugin" -or $PluginName -eq "claude-code-setup") { return }
 
     $DestFolder = Join-Path $PluginsPath $PluginName
-    Write-Host "Syncing plugin: $PluginName..." -ForegroundColor Yellow
+    Write-Log "Syncing plugin: $PluginName..." -Color Yellow
 
     if (-not (Test-Path $DestFolder)) {
         New-Item -ItemType Directory -Path $DestFolder -Force | Out-Null
@@ -63,39 +69,48 @@ function Install-Plugin($SrcFolder) {
     }
 }
 
-# 4. Handle External Plugin Installation (if URL is provided)
+# 3. Handle External Plugin Installation (if URL is provided)
 if ($ExternalUrl -ne "") {
     $PluginName = ($ExternalUrl -split '/')[-1] -replace '\.git$',''
     $TempPath = Join-Path $ScratchPath $PluginName
     
-    Write-Host "Cloning external plugin from $ExternalUrl..." -ForegroundColor Cyan
+    Write-Log "Cloning external plugin from $ExternalUrl..." -Color Cyan
     if (Test-Path $TempPath) { Remove-Item -Recurse -Force $TempPath }
-    git clone --depth 1 $ExternalUrl $TempPath
+    
+    if ($Silent) {
+        git clone --depth 1 $ExternalUrl $TempPath *>$null
+    } else {
+        git clone --depth 1 $ExternalUrl $TempPath
+    }
     
     if (Test-Path $TempPath) {
         Install-Plugin $TempPath
-        Write-Host "External plugin installed successfully!" -ForegroundColor Green
+        Write-Log "External plugin installed successfully!" -Color Green
     } else {
-        Write-Host "Failed to clone external repository." -ForegroundColor Red
+        Write-Log "Failed to clone external repository." -Color Red
     }
     
-    # Copy script before exiting
+    # Copy script before returning
     $LocalScriptPath = Join-Path $PluginsPath "sync-claude-plugins.ps1"
     if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
         Copy-Item -Path $MyInvocation.MyCommand.Path -Destination $LocalScriptPath -Force -ErrorAction SilentlyContinue
     }
-    exit
+    return
 }
 
-# 5. Regular Official Repo Sync
+# 4. Regular Official Repo Sync
 if (Test-Path $RepoPath) {
-    Write-Host "Updating local repository..." -ForegroundColor Cyan
+    Write-Log "Updating local repository..." -Color Cyan
     Push-Location $RepoPath
-    git pull
+    if ($Silent) { git pull *>$null } else { git pull }
     Pop-Location
 } else {
-    Write-Host "Cloning official Claude plugins repository..." -ForegroundColor Cyan
-    git clone --depth 1 $RepoUrl $RepoPath
+    Write-Log "Cloning official Claude plugins repository..." -Color Cyan
+    if ($Silent) {
+        git clone --depth 1 $RepoUrl $RepoPath *>$null
+    } else {
+        git clone --depth 1 $RepoUrl $RepoPath
+    }
 }
 
 if (Test-Path (Join-Path $RepoPath "plugins")) {
@@ -106,7 +121,7 @@ if (Test-Path (Join-Path $RepoPath "external_plugins")) {
     Get-ChildItem -Path (Join-Path $RepoPath "external_plugins") -Directory | ForEach-Object { Install-Plugin $_.FullName }
 }
 
-# 6. Write/generate the claude-plugins-manager plugin and skill
+# 5. Write/generate the claude-plugins-manager plugin and skill
 $ManagerFolder = Join-Path $PluginsPath "claude-plugins-manager"
 $ManagerSkillsFolder = Join-Path $ManagerFolder "skills\sync-plugins"
 
@@ -114,8 +129,8 @@ if (-not (Test-Path $ManagerSkillsFolder)) { New-Item -ItemType Directory -Path 
 
 $ManagerJson = @{
     name = "claude-plugins-manager"
-    version = "1.1.0"
-    description = "Manage, sync, and install official and third-party Claude plugins for Antigravity"
+    version = "1.2.0"
+    description = "Manage, sync, and install official and third-party Claude plugins globally for Antigravity"
     author = @{ name = "jersonalvr" }
 } | ConvertTo-Json
 
@@ -124,15 +139,15 @@ $ManagerJson = @{
 $SkillMd = @'
 ---
 name: sync-plugins
-description: Sync official Claude plugins or install third-party plugins in the Antigravity configuration directory. Use when the user asks to update plugins, sync plugins, or install a skill/plugin from an external URL.
+description: Sync official Claude plugins or install third-party plugins globally in the .gemini configuration directory. Use when the user asks to update plugins, sync plugins, or install a skill/plugin from an external URL.
 ---
 
 # Sync and Install Claude Plugins
 
-You are an agent with a skill to manage and install plugins into the Antigravity CLI configuration directory.
+You are an agent with a skill to manage and install plugins into the global configuration directory.
 
 To perform the action:
-1. Proactively run the appropriate command depending on the OS and the user's request:
+1. Proactively run the appropriate command depending on the OS and the user's request. Do not use the Silent flag so you can read the output.
 
    **A. To Sync Official Plugins (No URL provided):**
    - On Windows: powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1
@@ -148,7 +163,7 @@ To perform the action:
 
 [System.IO.File]::WriteAllText((Join-Path $ManagerSkillsFolder "SKILL.md"), $SkillMd)
 
-# 7. Save a copy of the sync script locally for future updates
+# 6. Save a copy of the sync script locally for future updates
 $ScriptUrl = "https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1"
 $LocalScriptPath = Join-Path $PluginsPath "sync-claude-plugins.ps1"
 
@@ -158,4 +173,4 @@ if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) 
     Invoke-WebRequest -Uri $ScriptUrl -OutFile $LocalScriptPath -UseBasicParsing -ErrorAction SilentlyContinue
 }
 
-Write-Host "Sync completed successfully!" -ForegroundColor Green
+Write-Log "Sync completed successfully!" -Color Green

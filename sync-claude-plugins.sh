@@ -1,13 +1,37 @@
 #!/bin/bash
 # sync-claude-plugins.sh
-# Script to synchronize official Claude Code plugins or install external skills
+# Script to synchronize official Claude Code plugins or install external skills globally
 
-EXTERNAL_URL="$1"
+EXTERNAL_URL=""
+SILENT=false
 
-REPO_URL="https://github.com/anthropics/claude-plugins-official.git"
-REPO_PATH="$HOME/.gemini/antigravity-cli/scratch/claude-plugins-official"
+# Parse arguments
+for arg in "$@"; do
+    if [ "$arg" = "--silent" ] || [ "$arg" = "-s" ]; then
+        SILENT=true
+    elif [ -n "$arg" ] && [[ "$arg" != -* ]]; then
+        EXTERNAL_URL="$arg"
+    fi
+done
+
+log() {
+    if [ "$SILENT" = false ]; then
+        echo "$1"
+    fi
+}
+
+run_git() {
+    if [ "$SILENT" = true ]; then
+        "$@" > /dev/null 2>&1
+    else
+        "$@"
+    fi
+}
+
 PLUGINS_PATH="$HOME/.gemini/config/plugins"
-SCRATCH_PATH="$HOME/.gemini/antigravity-cli/scratch"
+SCRATCH_PATH="$HOME/.gemini/scratch"
+REPO_PATH="$SCRATCH_PATH/claude-plugins-official"
+REPO_URL="https://github.com/anthropics/claude-plugins-official.git"
 
 # 1. Ensure paths exist
 mkdir -p "$SCRATCH_PATH"
@@ -22,7 +46,7 @@ install_plugin() {
     if [ "$plugin_name" = "example-plugin" ] || [ "$plugin_name" = "claude-code-setup" ]; then return; fi
 
     local dest_folder="$PLUGINS_PATH/$plugin_name"
-    echo "Syncing plugin: $plugin_name..."
+    log "Syncing plugin: $plugin_name..."
     mkdir -p "$dest_folder"
 
     # Copy files/folders excluding hidden/git folders
@@ -53,15 +77,15 @@ if [ -n "$EXTERNAL_URL" ]; then
     PLUGIN_NAME=$(basename "$EXTERNAL_URL" .git)
     TEMP_PATH="$SCRATCH_PATH/$PLUGIN_NAME"
     
-    echo "Cloning external plugin from $EXTERNAL_URL..."
+    log "Cloning external plugin from $EXTERNAL_URL..."
     rm -rf "$TEMP_PATH"
-    git clone --depth 1 "$EXTERNAL_URL" "$TEMP_PATH"
+    run_git git clone --depth 1 "$EXTERNAL_URL" "$TEMP_PATH"
     
     if [ -d "$TEMP_PATH" ]; then
         install_plugin "$TEMP_PATH"
-        echo "External plugin installed successfully!"
+        log "External plugin installed successfully!"
     else
-        echo "Failed to clone external repository."
+        log "Failed to clone external repository."
     fi
     
     # Copy script before exiting
@@ -73,13 +97,13 @@ fi
 
 # 4. Regular Official Repo Sync
 if [ -d "$REPO_PATH" ]; then
-    echo "Updating local repository..."
+    log "Updating local repository..."
     pushd "$REPO_PATH" > /dev/null
-    git pull
+    run_git git pull
     popd > /dev/null
 else
-    echo "Cloning official Claude plugins repository..."
-    git clone --depth 1 "$REPO_URL" "$REPO_PATH"
+    log "Cloning official Claude plugins repository..."
+    run_git git clone --depth 1 "$REPO_URL" "$REPO_PATH"
 fi
 
 if [ -d "$REPO_PATH/plugins" ]; then
@@ -102,8 +126,8 @@ mkdir -p "$MANAGER_SKILLS_FOLDER"
 cat << 'EOF' > "$MANAGER_FOLDER/plugin.json"
 {
   "name": "claude-plugins-manager",
-  "version": "1.1.0",
-  "description": "Manage, sync, and install official and third-party Claude plugins for Antigravity",
+  "version": "1.2.0",
+  "description": "Manage, sync, and install official and third-party Claude plugins globally for Antigravity",
   "author": {
     "name": "jersonalvr"
   }
@@ -113,18 +137,18 @@ EOF
 cat << 'EOF' > "$MANAGER_SKILLS_FOLDER/SKILL.md"
 ---
 name: sync-plugins
-description: Sync official Claude plugins or install third-party plugins in the Antigravity configuration directory. Use when the user asks to update plugins, sync plugins, or install a skill/plugin from an external URL.
+description: Sync official Claude plugins or install third-party plugins globally in the .gemini configuration directory. Use when the user asks to update plugins, sync plugins, or install a skill/plugin from an external URL.
 ---
 
 # Sync and Install Claude Plugins
 
-You are an agent with a skill to manage and install plugins into the Antigravity CLI configuration directory.
+You are an agent with a skill to manage and install plugins into the global configuration directory.
 
 To perform the action:
-1. Proactively run the appropriate command depending on the OS and the user's request:
+1. Proactively run the appropriate command depending on the OS and the user's request. Do not use the Silent flag so you can read the output.
 
    **A. To Sync Official Plugins (No URL provided):**
-   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1` (expand $Home).
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh`
 
    **B. To Install an External Plugin (User provides a Git URL):**
@@ -146,4 +170,4 @@ else
     curl -sSf "$SCRIPT_URL" -o "$LOCAL_SCRIPT_PATH" 2>/dev/null
 fi
 
-echo "Sync completed successfully!"
+log "Sync completed successfully!"
