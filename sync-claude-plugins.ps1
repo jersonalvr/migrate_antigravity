@@ -67,6 +67,62 @@ function Install-Plugin($SrcFolder) {
         $BasicJson = @{ name = $PluginName } | ConvertTo-Json
         [System.IO.File]::WriteAllText((Join-Path $DestFolder "plugin.json"), $BasicJson)
     }
+
+    # A. Restructure root-level SKILL.md if found
+    $RootSkill = Join-Path $DestFolder "SKILL.md"
+    if (Test-Path $RootSkill) {
+        $TargetSkillFolder = Join-Path $DestFolder "skills\$PluginName"
+        if (-not (Test-Path $TargetSkillFolder)) {
+            New-Item -ItemType Directory -Path $TargetSkillFolder -Force | Out-Null
+        }
+        Move-Item -Path $RootSkill -Destination (Join-Path $TargetSkillFolder "SKILL.md") -Force
+        
+        # Move related resource folders if they exist at root
+        foreach ($Folder in @("references", "scripts", "examples")) {
+            $RootFolder = Join-Path $DestFolder $Folder
+            if (Test-Path $RootFolder) {
+                Move-Item -Path $RootFolder -Destination $TargetSkillFolder -Force
+            }
+        }
+    }
+
+    # B. Scan for SKILL.md files and rename conflicting names
+    Get-ChildItem -Path $DestFolder -Filter "SKILL.md" -Recurse | ForEach-Object {
+        $SkillFile = $_.FullName
+        $ParentDir = Split-Path (Split-Path $SkillFile -Parent) -Leaf
+        $Content = [System.IO.File]::ReadAllText($SkillFile, [System.Text.Encoding]::UTF8)
+        
+        # Split content by '---' to isolate frontmatter
+        $Parts = $Content -split '---', 3
+        if ($Parts.Length -ge 3) {
+            $Frontmatter = $Parts[1]
+            
+            # 1. Check if name exists
+            if ($Frontmatter -notmatch '(?m)^name\s*:') {
+                $Frontmatter = "`nname: $ParentDir" + $Frontmatter
+                $SkillName = $ParentDir
+            } else {
+                # Extract name
+                if ($Frontmatter -match '(?m)^name:\s*[''"]?([^\''"\r\n]+)[''"]?\s*$') {
+                    $SkillName = $Matches[1].Trim()
+                } else {
+                    $SkillName = $ParentDir
+                }
+            }
+            
+            # 2. Rename if it is generic
+            if ($SkillName -eq "access" -or $SkillName -eq "configure") {
+                $NewSkillName = "$PluginName-$SkillName"
+                $Frontmatter = $Frontmatter -replace '(?m)^name:\s*.*$', "name: $NewSkillName"
+            }
+            
+            $Parts[1] = $Frontmatter
+            $NewContent = $Parts -join '---'
+            if ($Content -ne $NewContent) {
+                [System.IO.File]::WriteAllText($SkillFile, $NewContent, [System.Text.Encoding]::UTF8)
+            }
+        }
+    }
 }
 
 # 3. Handle External Plugin Installation (if URL is provided)
@@ -84,7 +140,25 @@ if ($ExternalUrl -ne "") {
     }
     
     if (Test-Path $TempPath) {
-        Install-Plugin $TempPath
+        $HasNested = $false
+        $PluginsDir = Join-Path $TempPath "plugins"
+        $ExtPluginsDir = Join-Path $TempPath "external_plugins"
+        
+        if (Test-Path $PluginsDir) {
+            Get-ChildItem -Path $PluginsDir -Directory | ForEach-Object {
+                Install-Plugin $_.FullName
+                $HasNested = $true
+            }
+        }
+        if (Test-Path $ExtPluginsDir) {
+            Get-ChildItem -Path $ExtPluginsDir -Directory | ForEach-Object {
+                Install-Plugin $_.FullName
+                $HasNested = $true
+            }
+        }
+        if (-not $HasNested) {
+            Install-Plugin $TempPath
+        }
         Write-Log "External plugin installed successfully!" -Color Green
     } else {
         Write-Log "Failed to clone external repository." -Color Red

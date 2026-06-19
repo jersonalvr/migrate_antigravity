@@ -70,6 +70,57 @@ install_plugin() {
     else
         echo "{\"name\": \"$plugin_name\"}" > "$dest_folder/plugin.json"
     fi
+
+    # A. Restructure root-level SKILL.md if found
+    if [ -f "$dest_folder/SKILL.md" ]; then
+        local target_skill_folder="$dest_folder/skills/$plugin_name"
+        mkdir -p "$target_skill_folder"
+        mv "$dest_folder/SKILL.md" "$target_skill_folder/SKILL.md"
+        
+        # Move related resource folders if they exist at root
+        for folder in references scripts examples; do
+            if [ -d "$dest_folder/$folder" ]; then
+                mv "$dest_folder/$folder" "$target_skill_folder/"
+            fi
+        done
+    fi
+
+    # B. Scan for SKILL.md files and rename conflicting names
+    find "$dest_folder" -name "SKILL.md" | while read -r skill_file; do
+        if [ -f "$skill_file" ]; then
+            python3 -c "
+import sys, os, re
+path = sys.argv[1]
+plugin_name = sys.argv[2]
+
+with open(path, 'r', encoding='utf-8') as f:
+    content = f.read()
+
+parts = content.split('---', 2)
+if len(parts) >= 3:
+    frontmatter = parts[1]
+    
+    # 1. Check if name exists
+    name_match = re.search(r'^name:\s*[\'\"]?([^\'\"]+)[\'\"]?\s*$', frontmatter, re.M)
+    if not name_match:
+        skill_name = os.path.basename(os.path.dirname(path))
+        frontmatter = f'\nname: {skill_name}' + frontmatter
+    else:
+        skill_name = name_match.group(1).strip()
+    
+    # 2. Rename if it is generic
+    if skill_name in ['access', 'configure']:
+        new_skill_name = f'{plugin_name}-{skill_name}'
+        frontmatter = re.sub(r'^name:\s*.*$', f'name: {new_skill_name}', frontmatter, flags=re.M)
+        
+    parts[1] = frontmatter
+    new_content = '---'.join(parts)
+    if new_content != content:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+" "$skill_file" "$plugin_name" 2>/dev/null || sed -i "s/^name:[[:space:]]*access[[:space:]]*$/name: ${plugin_name}-access/g; s/^name:[[:space:]]*configure[[:space:]]*$/name: ${plugin_name}-configure/g" "$skill_file"
+        fi
+    done
 }
 
 # 3. Handle External Plugin Installation
@@ -82,7 +133,26 @@ if [ -n "$EXTERNAL_URL" ]; then
     run_git git clone --depth 1 "$EXTERNAL_URL" "$TEMP_PATH"
     
     if [ -d "$TEMP_PATH" ]; then
-        install_plugin "$TEMP_PATH"
+        has_nested=false
+        if [ -d "$TEMP_PATH/plugins" ]; then
+            for nested_dir in "$TEMP_PATH/plugins"/*; do
+                if [ -d "$nested_dir" ]; then
+                    install_plugin "$nested_dir"
+                    has_nested=true
+                fi
+            done
+        fi
+        if [ -d "$TEMP_PATH/external_plugins" ]; then
+            for nested_dir in "$TEMP_PATH/external_plugins"/*; do
+                if [ -d "$nested_dir" ]; then
+                    install_plugin "$nested_dir"
+                    has_nested=true
+                fi
+            done
+        fi
+        if [ "$has_nested" = false ]; then
+            install_plugin "$TEMP_PATH"
+        fi
         log "External plugin installed successfully!"
     else
         log "Failed to clone external repository."
