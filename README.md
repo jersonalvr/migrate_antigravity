@@ -27,6 +27,53 @@ Este script soluciona este problema de manera automatizada:
 
 ---
 
+## 🐧 Instalación de Antigravity IDE en Linux
+
+Si necesitas instalar **Antigravity IDE** en tu sistema Linux, puedes seguir estos pasos para descargarlo, extraerlo y configurarlo adecuadamente:
+
+### 1. Obtener dinámicamente el enlace de la última versión estable
+Los detalles de los lanzamientos estables se obtienen de la API de lanzamientos. Para automatizar la descarga de la última versión, se realiza una petición a `https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/releases` y se obtiene la primera versión de la lista para construir la URL de descarga.
+
+La estructura de la URL de descarga para la versión de Linux de 64 bits es la siguiente:
+```text
+https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/{versión}-{execution_id}/linux-x64/Antigravity%20IDE.tar.gz
+```
+
+### 2. Comandos de terminal
+Ejecuta los siguientes comandos para descargar dinámicamente la última versión estable, descomprimir, configurar los permisos de ejecución del IDE y de su sandbox, y finalmente iniciar la aplicación:
+
+```bash
+# Opción A: Obtener la última versión con 'jq'
+LATEST_RELEASE=$(curl -s https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/releases | jq -r '.[0] | "\(.version)-\(.execution_id)"')
+
+# Opción B: Obtener la última versión con 'python3' (si no tienes 'jq' instalado)
+# LATEST_RELEASE=$(curl -s https://antigravity-ide-auto-updater-974169037036.us-central1.run.app/releases | python3 -c "import sys, json; r=json.load(sys.stdin)[0]; print(f\"{r['version']}-{r['execution_id']}\")")
+
+# Descargar el archivo usando la URL construida dinámicamente
+wget "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/${LATEST_RELEASE}/linux-x64/Antigravity%20IDE.tar.gz"
+
+# Extraer el archivo tar.gz
+tar -xzf "Antigravity IDE.tar.gz"
+
+# Renombrar la carpeta extraída a Antigravity_IDE
+mv "Antigravity IDE" Antigravity_IDE
+
+# Entrar al directorio
+cd Antigravity_IDE
+
+# Asignar permisos de ejecución al binario principal
+chmod +x antigravity-ide
+
+# Configurar permisos para chrome-sandbox (necesario para el sandboxing de Chromium)
+sudo chown root:root chrome-sandbox
+sudo chmod 4755 chrome-sandbox
+
+# Ejecutar Antigravity IDE
+./antigravity-ide
+```
+
+---
+
 ## Cómo Ejecutar la Migración
 
 ```bash
