@@ -4,11 +4,14 @@
 
 EXTERNAL_URL=""
 SILENT=false
+SKIP_SCAN=false
 
 # Parse arguments
 for arg in "$@"; do
     if [ "$arg" = "--silent" ] || [ "$arg" = "-s" ]; then
         SILENT=true
+    elif [ "$arg" = "--skip-scan" ] || [ "$arg" = "--skip-security-scan" ]; then
+        SKIP_SCAN=true
     elif [ -n "$arg" ] && [[ "$arg" != -* ]]; then
         EXTERNAL_URL="$arg"
     fi
@@ -32,6 +35,82 @@ PLUGINS_PATH="$HOME/.gemini/config/plugins"
 SCRATCH_PATH="$HOME/.gemini/scratch"
 REPO_PATH="$SCRATCH_PATH/claude-plugins-official"
 REPO_URL="https://github.com/anthropics/claude-plugins-official.git"
+
+# Ensure ~/.local/bin is in PATH (standard path for uv tools)
+if [ -d "$HOME/.local/bin" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+test_skillspector_installed() {
+    command -v skillspector >/dev/null 2>&1
+}
+
+ensure_skillspector() {
+    if test_skillspector_installed; then
+        return 0
+    fi
+
+    log "SkillSpector no está instalado. Instalándolo automáticamente para garantizar la seguridad..."
+    if command -v uv >/dev/null 2>&1; then
+        log "Instalando NVIDIA SkillSpector vía 'uv tool install'..."
+        if [ "$SILENT" = true ]; then
+            uv tool install git+https://github.com/NVIDIA/skillspector.git >/dev/null 2>&1
+        else
+            uv tool install git+https://github.com/NVIDIA/skillspector.git
+        fi
+    elif command -v pip >/dev/null 2>&1 || command -v pip3 >/dev/null 2>&1; then
+        local pip_cmd="pip"
+        command -v pip3 >/dev/null 2>&1 && pip_cmd="pip3"
+        log "Instalando NVIDIA SkillSpector vía '$pip_cmd install'..."
+        if [ "$SILENT" = true ]; then
+            $pip_cmd install git+https://github.com/NVIDIA/skillspector.git >/dev/null 2>&1
+        else
+            $pip_cmd install git+https://github.com/NVIDIA/skillspector.git
+        fi
+    else
+        log "Aviso: No se encontró 'uv' ni 'pip' para instalar SkillSpector. Se continuará la instalación sin escaneo."
+        return 1
+    fi
+
+    if [ -d "$HOME/.local/bin" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+
+    if test_skillspector_installed; then
+        log "SkillSpector se instaló con éxito."
+        return 0
+    else
+        log "Aviso: No se pudo verificar la instalación de SkillSpector."
+        return 1
+    fi
+}
+
+invoke_skill_security_scan() {
+    local target_folder="$1"
+    if [ "$SKIP_SCAN" = true ]; then
+        log "Escaneo de seguridad omitido por el usuario (--skip-scan)."
+        return 0
+    fi
+
+    if ! ensure_skillspector; then
+        log "Continuando sin escaneo de seguridad (SkillSpector no disponible)."
+        return 0
+    fi
+
+    log "Ejecutando escaneo de seguridad con NVIDIA SkillSpector (modo estático ultra rápido)..."
+    skillspector scan "$target_folder" --no-llm
+    local scan_exit_code=$?
+
+    if [ $scan_exit_code -ne 0 ]; then
+        log "❌ ALERTA DE SEGURIDAD: SkillSpector detectó un nivel de riesgo crítico o elevado en el plugin (Exit Code: $scan_exit_code)."
+        log "La instalación se ha cancelado automáticamente para proteger tu entorno."
+        log "Si confías plenamente en este código y deseas forzar su instalación, ejecuta el script agregando: --skip-scan"
+        return 1
+    fi
+
+    log "✅ Escaneo completado: No se detectaron riesgos críticos en el plugin."
+    return 0
+}
 
 # 1. Ensure paths exist
 mkdir -p "$SCRATCH_PATH"
@@ -133,6 +212,12 @@ if [ -n "$EXTERNAL_URL" ]; then
     run_git git clone --depth 1 "$EXTERNAL_URL" "$TEMP_PATH"
     
     if [ -d "$TEMP_PATH" ]; then
+        # Validar seguridad con SkillSpector antes de proceder a la instalación
+        if ! invoke_skill_security_scan "$TEMP_PATH"; then
+            rm -rf "$TEMP_PATH"
+            exit 1
+        fi
+
         has_nested=false
         if [ -d "$TEMP_PATH/plugins" ]; then
             for nested_dir in "$TEMP_PATH/plugins"/*; do
@@ -224,6 +309,10 @@ To perform the action:
    **B. To Install an External Plugin (User provides a Git URL):**
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"`
+   *(Note: External plugins are automatically scanned with NVIDIA SkillSpector. Pass -SkipScan or --skip-scan to bypass)*
+
+   **C. To Audit Any Plugin or Skill On-Demand:**
+   - On Windows/macOS/Linux: `skillspector scan "PATH_TO_SKILL" --no-llm`
 
 2. Report the output of the execution to the user.
 3. Tell the user that the plugin(s) are now ready to be used.

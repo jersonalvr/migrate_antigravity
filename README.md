@@ -125,7 +125,7 @@ curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/
 
 #### B. Instalar un plugin externo desde Git
 
-Puedes instalar un repositorio de un desarrollador externo pasando la URL de Git como argumento.
+Puedes instalar un repositorio de un desarrollador externo pasando la URL de Git como argumento. El script ejecutará automáticamente un análisis de seguridad previo con **NVIDIA SkillSpector**.
 
 **Windows (PowerShell):**
 
@@ -135,10 +135,20 @@ Puedes instalar un repositorio de un desarrollador externo pasando la URL de Git
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -ExternalUrl "https://github.com/usuario/repositorio-plugin.git"
 ```
 
+*Para omitir el análisis de seguridad:*
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -ExternalUrl "https://github.com/usuario/repositorio-plugin.git" -SkipScan
+```
+
 **macOS / Linux (Bash):**
 
 ```bash
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- "https://github.com/usuario/repositorio-plugin.git"
+```
+
+*Para omitir el análisis de seguridad:*
+```bash
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- "https://github.com/usuario/repositorio-plugin.git" --skip-scan
 ```
 
 ### Ejecución Local
@@ -150,10 +160,29 @@ Si prefieres descargar y ejecutar el proceso usando los scripts locales de este 
 * **Windows (Como Administrador):** `.\sync-claude-plugins.ps1`
 * **macOS / Linux:** `chmod +x sync-claude-plugins.sh && ./sync-claude-plugins.sh`
 
-#### B. Instalar un plugin externo
+#### B. Instalar un plugin externo (con escaneo de seguridad)
 
 * **Windows (Como Administrador):** `.\sync-claude-plugins.ps1 -ExternalUrl "https://github.com/usuario/repositorio-plugin.git"`
+* **Windows (Omitir escaneo):** `.\sync-claude-plugins.ps1 -ExternalUrl "https://github.com/usuario/repositorio-plugin.git" -SkipScan`
 * **macOS / Linux:** `./sync-claude-plugins.sh "https://github.com/usuario/repositorio-plugin.git"`
+* **macOS / Linux (Omitir escaneo):** `./sync-claude-plugins.sh "https://github.com/usuario/repositorio-plugin.git" --skip-scan`
+
+---
+
+## 🛡️ Escaneo de Seguridad con NVIDIA SkillSpector
+
+Los scripts incorporan integración predeterminada con **[NVIDIA SkillSpector](https://github.com/nvidia/skillspector)**, el escáner de seguridad diseñado para detectar vulnerabilidades en skills y plugins de agentes de IA (Claude Code, Antigravity, MCP):
+
+* **Instalación Automática:** Si `skillspector` no está instalado en tu sistema, el script lo descargará e instalará automáticamente vía `uv` (o `pip`) en la primera ejecución.
+* **Uso a Demanda Ultra Rápido:** Una vez instalado, los análisis posteriores se ejecutan de manera instantánea mediante análisis estático (`--no-llm`), revisando prompt injection, exfiltración de credenciales, patrones de ejecución arbitrarios y supply-chain.
+* **Bloqueo Preventivo:** Si el plugin externo supera el umbral de riesgo o presenta amenazas críticas, la instalación se aborta inmediatamente antes de copiar ningún archivo al directorio de configuración del agente (`~/.gemini/config/plugins`).
+* **Omisión Opcional:** Puedes omitir la verificación de seguridad pasando el parámetro `-SkipScan` en PowerShell o `--skip-scan` en Bash si confías plenamente en el código.
+* **Auditoría Manual a Demanda:** Puedes auditar cualquier plugin o skill ya instalado ejecutando:
+  ```bash
+  skillspector scan ~/.gemini/config/plugins/<nombre-plugin> --no-llm
+  ```
+
+---
 
 ### 🧠 Habilidad Automatizada (Skill)
 
@@ -162,3 +191,4 @@ Ambos scripts instalan automáticamente el plugin de administración `claude-plu
 * *"actualizar plugins"*
 * *"sincronizar plugins de Claude"*
 * *"instala este plugin para el CLI: https://github.com/usuario/repositorio-plugin.git"*
+* *"audita la seguridad de la skill X con SkillSpector"*

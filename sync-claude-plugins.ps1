@@ -3,7 +3,8 @@
 
 param(
     [string]$ExternalUrl = "",
-    [switch]$Silent
+    [switch]$Silent,
+    [switch]$SkipScan
 )
 
 function Write-Log {
@@ -17,6 +18,93 @@ $PluginsPath = Join-Path $Home ".gemini\config\plugins"
 $ScratchPath = Join-Path $Home ".gemini\scratch"
 $RepoPath = Join-Path $ScratchPath "claude-plugins-official"
 $RepoUrl = "https://github.com/anthropics/claude-plugins-official.git"
+
+# Ensure ~/.local/bin is in PATH (standard path for uv tools)
+$LocalBin = Join-Path $Home ".local\bin"
+if (Test-Path $LocalBin) {
+    if ($env:PATH -notlike "*$LocalBin*") {
+        $env:PATH = "$LocalBin;$env:PATH"
+    }
+}
+
+function Test-SkillSpectorInstalled {
+    if (Get-Command "skillspector" -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    $LocalExe = Join-Path $LocalBin "skillspector.exe"
+    if (Test-Path $LocalExe) {
+        $env:PATH = "$LocalBin;$env:PATH"
+        return $true
+    }
+    return $false
+}
+
+function Ensure-SkillSpector {
+    if (Test-SkillSpectorInstalled) {
+        return $true
+    }
+
+    Write-Log "SkillSpector no está instalado. Instalándolo automáticamente para garantizar la seguridad..." -Color Yellow
+
+    if (Get-Command "uv" -ErrorAction SilentlyContinue) {
+        Write-Log "Instalando NVIDIA SkillSpector vía 'uv tool install'..." -Color Cyan
+        if ($Silent) {
+            uv tool install git+https://github.com/NVIDIA/skillspector.git *>$null
+        } else {
+            uv tool install git+https://github.com/NVIDIA/skillspector.git
+        }
+    } elseif (Get-Command "pip" -ErrorAction SilentlyContinue) {
+        Write-Log "Instalando NVIDIA SkillSpector vía 'pip install'..." -Color Cyan
+        if ($Silent) {
+            pip install git+https://github.com/NVIDIA/skillspector.git *>$null
+        } else {
+            pip install git+https://github.com/NVIDIA/skillspector.git
+        }
+    } else {
+        Write-Log "Aviso: No se encontró 'uv' ni 'pip' para instalar SkillSpector. Se continuará sin escaneo." -Color Yellow
+        return $false
+    }
+
+    if (Test-Path (Join-Path $LocalBin "skillspector.exe")) {
+        $env:PATH = "$LocalBin;$env:PATH"
+    }
+
+    if (Test-SkillSpectorInstalled) {
+        Write-Log "SkillSpector instalado con éxito." -Color Green
+        return $true
+    } else {
+        Write-Log "Aviso: No se pudo verificar la instalación de SkillSpector." -Color Yellow
+        return $false
+    }
+}
+
+function Invoke-SkillSecurityScan($TargetFolder) {
+    if ($SkipScan) {
+        Write-Log "Escaneo de seguridad omitido por el usuario (-SkipScan)." -Color DarkGray
+        return $true
+    }
+
+    $Installed = Ensure-SkillSpector
+    if (-not $Installed) {
+        Write-Log "Continuando sin escaneo de seguridad (SkillSpector no disponible)." -Color Yellow
+        return $true
+    }
+
+    Write-Log "Ejecutando escaneo de seguridad con NVIDIA SkillSpector (modo estático ultra rápido)..." -Color Cyan
+
+    & skillspector scan $TargetFolder --no-llm
+    $ScanExitCode = $LASTEXITCODE
+
+    if ($ScanExitCode -ne 0) {
+        Write-Log "❌ ALERTA DE SEGURIDAD: SkillSpector detectó un nivel de riesgo crítico o elevado en el plugin (Exit Code: $ScanExitCode)." -Color Red
+        Write-Log "La instalación ha sido cancelada para proteger tu entorno." -Color Red
+        Write-Log "Si confías plenamente en este código y deseas forzar la instalación, ejecuta el script agregando: -SkipScan" -Color Yellow
+        return $false
+    }
+
+    Write-Log "✅ Escaneo completado: No se detectaron riesgos críticos en el plugin." -Color Green
+    return $true
+}
 
 # 1. Ensure paths exist
 if (-not (Test-Path $ScratchPath)) {
@@ -140,6 +228,13 @@ if ($ExternalUrl -ne "") {
     }
     
     if (Test-Path $TempPath) {
+        # Validar seguridad con SkillSpector antes de proceder a la instalación
+        $ScanPassed = Invoke-SkillSecurityScan $TempPath
+        if (-not $ScanPassed) {
+            Remove-Item -Recurse -Force $TempPath
+            return
+        }
+
         $HasNested = $false
         $PluginsDir = Join-Path $TempPath "plugins"
         $ExtPluginsDir = Join-Path $TempPath "external_plugins"
@@ -230,6 +325,10 @@ To perform the action:
    **B. To Install an External Plugin (User provides a Git URL):**
    - On Windows: powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"
    - On macOS/Linux: bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"
+   *(Note: External plugins are automatically scanned with NVIDIA SkillSpector. Pass -SkipScan or --skip-scan to bypass)*
+
+   **C. To Audit Any Plugin or Skill On-Demand:**
+   - On Windows/macOS/Linux: skillspector scan "PATH_TO_SKILL" --no-llm
 
 2. Report the output of the execution to the user.
 3. Tell the user that the plugin(s) are now ready to be used.
