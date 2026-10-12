@@ -92,8 +92,48 @@ function Invoke-SkillSecurityScan($TargetFolder) {
 
     Write-Log "Ejecutando escaneo de seguridad con NVIDIA SkillSpector (modo estático ultra rápido)..." -Color Cyan
 
-    & skillspector scan $TargetFolder --no-llm
+    $ReportFile = Join-Path $ScratchPath "skillspector_scan.json"
+    if (Test-Path $ReportFile) { Remove-Item -Force $ReportFile }
+
+    & skillspector scan $TargetFolder --no-llm --format json --output $ReportFile
     $ScanExitCode = $LASTEXITCODE
+
+    # Extraer y desglosar archivos comprometidos / señalados para análisis del usuario y del agente
+    if (Test-Path $ReportFile) {
+        try {
+            $JsonContent = Get-Content $ReportFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $Risk = $JsonContent.risk_assessment
+            $Issues = $JsonContent.issues
+
+            if ($Issues -and $Issues.Count -gt 0) {
+                $RiskSeverity = if ($Risk -and $Risk.severity) { $Risk.severity } else { "UNKNOWN" }
+                $RiskScore = if ($Risk -and $Risk.score -ne $null) { $Risk.score } else { "N/A" }
+                $RiskRec = if ($Risk -and $Risk.recommendation) { $Risk.recommendation } else { "N/A" }
+
+                Write-Log "`n--- DETALLE DE SEGURIDAD (NVIDIA SkillSpector) ---" -Color Yellow
+                Write-Log "Nivel de Riesgo: $RiskSeverity (Score: $RiskScore/100) - Recomendación: $RiskRec" -Color $(if ($RiskSeverity -eq "CRITICAL" -or $RiskSeverity -eq "HIGH") { "Red" } else { "Yellow" })
+                Write-Log "Archivos comprometidos / señalados ($($Issues.Count) hallazgos detectados):" -Color Yellow
+
+                $FilesGroup = $Issues | Group-Object { $_.location.file }
+                foreach ($Group in $FilesGroup) {
+                    Write-Log "  • Archivo: $($Group.Name)" -Color Cyan
+                    foreach ($Iss in ($Group.Group | Select-Object -First 3)) {
+                        $LineInfo = if ($Iss.location.start_line) { " (línea $($Iss.location.start_line))" } else { "" }
+                        $Pat = if ($Iss.pattern) { $Iss.pattern } else { $Iss.id }
+                        $Cat = if ($Iss.category) { $Iss.category } else { "General" }
+                        $SevCol = if ($Iss.severity -eq "HIGH" -or $Iss.severity -eq "CRITICAL") { "Red" } else { "White" }
+                        Write-Log "      - [$($Iss.severity)] $($Cat): $Pat$LineInfo" -Color $SevCol
+                    }
+                    if ($Group.Group.Count -gt 3) {
+                        Write-Log "      - ... (+ $($Group.Group.Count - 3) observaciones adicionales en este archivo)" -Color DarkGray
+                    }
+                }
+                Write-Log "--------------------------------------------------`n" -Color Yellow
+            }
+        } catch {
+            Write-Log "Aviso: No se pudo formatear el detalle del reporte JSON: $_" -Color DarkGray
+        }
+    }
 
     if ($ScanExitCode -ne 0) {
         Write-Log "❌ ALERTA DE SEGURIDAD: SkillSpector detectó un nivel de riesgo crítico o elevado en el plugin (Exit Code: $ScanExitCode)." -Color Red
@@ -330,8 +370,12 @@ To perform the action:
    **C. To Audit Any Plugin or Skill On-Demand:**
    - On Windows/macOS/Linux: skillspector scan "PATH_TO_SKILL" --no-llm
 
-2. Report the output of the execution to the user.
-3. Tell the user that the plugin(s) are now ready to be used.
+2. Report the output of the execution to the user:
+   - If SkillSpector detects risks and blocks installation, the output will list the specific compromised/flagged files, categories, and line numbers.
+   - You MUST review each reported file and finding to provide an informed, reasoned security audit to the user instead of a generic error message:
+     * Explain whether the findings are true malicious risks (e.g. credential theft, unauthorized file access, rogue scripts) or common structural/prompting false positives (e.g. strict anti-laziness rules, HTML placeholder comments, unpinned MCP/npx packages).
+     * Advise the user that if they review the code and trust the repository, they can bypass the block by re-running with -SkipScan or --skip-scan.
+3. If successful, tell the user that the plugin(s) are now ready to be used.
 '@
 
 [System.IO.File]::WriteAllText((Join-Path $ManagerSkillsFolder "SKILL.md"), $SkillMd)

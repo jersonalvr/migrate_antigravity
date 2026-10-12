@@ -98,8 +98,52 @@ invoke_skill_security_scan() {
     fi
 
     log "Ejecutando escaneo de seguridad con NVIDIA SkillSpector (modo estático ultra rápido)..."
-    skillspector scan "$target_folder" --no-llm
+    local report_file="$SCRATCH_PATH/skillspector_scan.json"
+    rm -f "$report_file"
+
+    skillspector scan "$target_folder" --no-llm --format json --output "$report_file"
     local scan_exit_code=$?
+
+    # Extraer y desglosar archivos comprometidos / señalados para análisis del usuario y del agente
+    if [ -f "$report_file" ]; then
+        local py_cmd="python3"
+        command -v python3 >/dev/null 2>&1 || py_cmd="python"
+        if command -v "$py_cmd" >/dev/null 2>&1; then
+            "$py_cmd" -c '
+import sys, json
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = json.load(f)
+    risk = data.get("risk_assessment", {})
+    issues = data.get("issues", [])
+    if issues:
+        sev = risk.get("severity", "UNKNOWN")
+        score = risk.get("score", "N/A")
+        rec = risk.get("recommendation", "N/A")
+        print("\n--- DETALLE DE SEGURIDAD (NVIDIA SkillSpector) ---")
+        print(f"Nivel de Riesgo: {sev} (Score: {score}/100) - Recomendación: {rec}")
+        print(f"Archivos comprometidos / señalados ({len(issues)} hallazgos detectados):")
+        by_file = {}
+        for iss in issues:
+            fn = iss.get("location", {}).get("file", "desconocido")
+            by_file.setdefault(fn, []).append(iss)
+        for fn, f_issues in sorted(by_file.items()):
+            print(f"  • Archivo: {fn}")
+            for iss in f_issues[:3]:
+                line = iss.get("location", {}).get("start_line")
+                line_str = f" (línea {line})" if line else ""
+                s = iss.get("severity", "INFO")
+                c = iss.get("category", "General")
+                p = iss.get("pattern", iss.get("id", ""))
+                print(f"      - [{s}] {c}: {p}{line_str}")
+            if len(f_issues) > 3:
+                print(f"      - ... (+ {len(f_issues) - 3} observaciones adicionales en este archivo)")
+        print("--------------------------------------------------\n")
+except Exception:
+    pass
+' "$report_file" 2>/dev/null
+        fi
+    fi
 
     if [ $scan_exit_code -ne 0 ]; then
         log "❌ ALERTA DE SEGURIDAD: SkillSpector detectó un nivel de riesgo crítico o elevado en el plugin (Exit Code: $scan_exit_code)."
@@ -314,8 +358,12 @@ To perform the action:
    **C. To Audit Any Plugin or Skill On-Demand:**
    - On Windows/macOS/Linux: `skillspector scan "PATH_TO_SKILL" --no-llm`
 
-2. Report the output of the execution to the user.
-3. Tell the user that the plugin(s) are now ready to be used.
+2. Report the output of the execution to the user:
+   - If SkillSpector detects risks and blocks installation, the output will list the specific compromised/flagged files, categories, and line numbers.
+   - You MUST review each reported file and finding to provide an informed, reasoned security audit to the user instead of a generic error message:
+     * Explain whether the findings are true malicious risks (e.g. credential theft, unauthorized file access, rogue scripts) or common structural/prompting false positives (e.g. strict anti-laziness rules, HTML placeholder comments, unpinned MCP/npx packages).
+     * Advise the user that if they review the code and trust the repository, they can bypass the block by re-running with -SkipScan or --skip-scan.
+3. If successful, tell the user that the plugin(s) are now ready to be used.
 EOF
 
 # 6. Save a copy of the sync script locally for future updates
