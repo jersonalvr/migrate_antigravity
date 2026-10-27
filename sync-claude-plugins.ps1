@@ -4,7 +4,9 @@
 param(
     [string]$ExternalUrl = "",
     [switch]$Silent,
-    [switch]$SkipScan
+    [switch]$SkipScan,
+    [switch]$All,
+    [switch]$CleanUnneeded
 )
 
 function Write-Log {
@@ -18,6 +20,33 @@ $PluginsPath = Join-Path $Home ".gemini\config\plugins"
 $ScratchPath = Join-Path $Home ".gemini\scratch"
 $RepoPath = Join-Path $ScratchPath "claude-plugins-official"
 $RepoUrl = "https://github.com/anthropics/claude-plugins-official.git"
+
+# Plugins excluidos por defecto para no saturar la ventana de contexto de Antigravity:
+# 1. LSPs (Antigravity IDE ya tiene soporte nativo de lenguaje vía su editor VS Code).
+# 2. Herramientas exclusivas del CLI de Claude (incompatibles o que leen carpetas inexistentes ~/.claude).
+# 3. Puentes de mensajería externa (añaden skills persistentes en cada turno de chat).
+# 4. Plugins de nicho extremo (hardware Cardputer, olimpiadas/demostraciones matemáticas).
+# 5. Conectores externos sin configurar o wrappers de formato de salida.
+$DefaultExcludedPlugins = @(
+    # LSPs redundantes (Antigravity tiene LSPs nativos)
+    "clangd-lsp", "csharp-lsp", "gopls-lsp", "jdtls-lsp", "kotlin-lsp",
+    "lua-lsp", "php-lsp", "pyright-lsp", "ruby-lsp", "rust-analyzer-lsp",
+    "swift-lsp", "typescript-lsp",
+
+    # Exclusivos de Claude Code CLI / Incompatibles
+    "example-plugin", "claude-code-setup", "claude-md-management",
+    "receipts", "session-report", "claude-security",
+
+    # Puentes de mensajería (skills access/configure consumen tokens innecesarios)
+    "discord", "imessage", "telegram",
+
+    # Nicho / Hardware / Matemáticas de concurso
+    "cwc-makers", "math-olympiad", "math-proof",
+
+    # Servicios externos no configurados / estilos de salida CLI
+    "asana", "linear", "gitlab", "laravel-boost", "fakechat",
+    "explanatory-output-style", "learning-output-style"
+)
 
 # Ensure ~/.local/bin is in PATH (standard path for uv tools)
 $LocalBin = Join-Path $Home ".local\bin"
@@ -155,11 +184,14 @@ if (-not (Test-Path $PluginsPath)) {
 }
 
 # 2. Function to install/update a plugin directory
-function Install-Plugin($SrcFolder) {
+function Install-Plugin($SrcFolder, [switch]$Force) {
     $PluginName = Split-Path $SrcFolder -Leaf
     
-    # Exclude boilerplate or setup plugins
-    if ($PluginName -eq "example-plugin" -or $PluginName -eq "claude-code-setup") { return }
+    # Exclude non-essential, redundant, or boilerplate plugins
+    if (-not $Force -and -not $All -and ($DefaultExcludedPlugins -contains $PluginName)) {
+        Write-Log "  [Omitido] $PluginName (no esencial / redundante con Antigravity). Usa -All para forzar." -Color DarkGray
+        return
+    }
 
     $DestFolder = Join-Path $PluginsPath $PluginName
     Write-Log "Syncing plugin: $PluginName..." -Color Yellow
@@ -281,18 +313,18 @@ if ($ExternalUrl -ne "") {
         
         if (Test-Path $PluginsDir) {
             Get-ChildItem -Path $PluginsDir -Directory | ForEach-Object {
-                Install-Plugin $_.FullName
+                Install-Plugin $_.FullName -Force
                 $HasNested = $true
             }
         }
         if (Test-Path $ExtPluginsDir) {
             Get-ChildItem -Path $ExtPluginsDir -Directory | ForEach-Object {
-                Install-Plugin $_.FullName
+                Install-Plugin $_.FullName -Force
                 $HasNested = $true
             }
         }
         if (-not $HasNested) {
-            Install-Plugin $TempPath
+            Install-Plugin $TempPath -Force
         }
         Write-Log "External plugin installed successfully!" -Color Green
     } else {
@@ -307,7 +339,29 @@ if ($ExternalUrl -ne "") {
     return
 }
 
-# 4. Regular Official Repo Sync
+# 4. Clean unneeded / non-essential plugins if requested or during standard sync
+if (-not $All) {
+    Write-Log "Optimizando ventana de contexto: verificando y removiendo plugins no esenciales..." -Color Cyan
+    $RemovedCount = 0
+    foreach ($Excluded in $DefaultExcludedPlugins) {
+        $InstalledDir = Join-Path $PluginsPath $Excluded
+        if (Test-Path $InstalledDir) {
+            Write-Log "  Removiendo plugin no esencial para liberar contexto: $Excluded..." -Color Yellow
+            Remove-Item -Recurse -Force $InstalledDir -ErrorAction SilentlyContinue
+            $RemovedCount++
+        }
+    }
+    if ($RemovedCount -gt 0) {
+        Write-Log "✅ Se removieron $RemovedCount plugins no esenciales para liberar presupuesto de tokens de contexto." -Color Green
+    }
+}
+
+if ($CleanUnneeded) {
+    Write-Log "Limpieza de plugins no esenciales finalizada." -Color Green
+    return
+}
+
+# 5. Regular Official Repo Sync
 if (Test-Path $RepoPath) {
     Write-Log "Updating local repository..." -Color Cyan
     Push-Location $RepoPath
@@ -330,7 +384,7 @@ if (Test-Path (Join-Path $RepoPath "external_plugins")) {
     Get-ChildItem -Path (Join-Path $RepoPath "external_plugins") -Directory | ForEach-Object { Install-Plugin $_.FullName }
 }
 
-# 5. Write/generate the claude-plugins-manager plugin and skill
+# 6. Write/generate the claude-plugins-manager plugin and skill
 $ManagerFolder = Join-Path $PluginsPath "claude-plugins-manager"
 $ManagerSkillsFolder = Join-Path $ManagerFolder "skills\sync-plugins"
 
@@ -338,8 +392,8 @@ if (-not (Test-Path $ManagerSkillsFolder)) { New-Item -ItemType Directory -Path 
 
 $ManagerJson = @{
     name = "claude-plugins-manager"
-    version = "1.2.0"
-    description = "Manage, sync, and install official and third-party Claude plugins globally for Antigravity"
+    version = "1.3.0"
+    description = "Manage, sync, and install official and third-party Claude plugins globally for Antigravity with context optimization"
     author = @{ name = "jersonalvr" }
 } | ConvertTo-Json
 
@@ -348,7 +402,7 @@ $ManagerJson = @{
 $SkillMd = @'
 ---
 name: sync-plugins
-description: Sync official Claude plugins or install third-party plugins globally in the .gemini configuration directory. Use when the user asks to update plugins, sync plugins, or install a skill/plugin from an external URL.
+description: Sync official Claude plugins or install third-party plugins globally in the .gemini configuration directory with automatic context token budget optimization. Use when the user asks to update plugins, sync plugins, clean unneeded plugins, or install a skill/plugin from an external URL.
 ---
 
 # Sync and Install Claude Plugins
@@ -358,17 +412,26 @@ You are an agent with a skill to manage and install plugins into the global conf
 To perform the action:
 1. Proactively run the appropriate command depending on the OS and the user's request. Do not use the Silent flag so you can read the output.
 
-   **A. To Sync Official Plugins (No URL provided):**
-   - On Windows: powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1
-   - On macOS/Linux: bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh
+   **A. To Sync Official Plugins (Optimized for Context Tokens - Recommended):**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh`
+   *(Omits redundant LSPs, chat bridges, and Claude CLI-only tools to avoid exceeding customization token budget)*
 
-   **B. To Install an External Plugin (User provides a Git URL):**
-   - On Windows: powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"
-   - On macOS/Linux: bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"
+   **B. To Force Install ALL Plugins (Including redundant LSPs and niche math/hardware):**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -All`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --all`
+
+   **C. To Clean / Remove Unneeded Plugins Only:**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -CleanUnneeded`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --clean`
+
+   **D. To Install an External Plugin (User provides a Git URL):**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"`
    *(Note: External plugins are automatically scanned with NVIDIA SkillSpector. Pass -SkipScan or --skip-scan to bypass)*
 
-   **C. To Audit Any Plugin or Skill On-Demand:**
-   - On Windows/macOS/Linux: skillspector scan "PATH_TO_SKILL" --no-llm
+   **E. To Audit Any Plugin or Skill On-Demand:**
+   - On Windows/macOS/Linux: `skillspector scan "PATH_TO_SKILL" --no-llm`
 
 2. Report the output of the execution to the user:
    - If SkillSpector detects risks and blocks installation, the output will list the specific compromised/flagged files, categories, and line numbers.

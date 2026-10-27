@@ -105,22 +105,43 @@ Esta carpeta también incluye herramientas para portar y sincronizar los plugins
 
 Puedes ejecutar los instaladores directamente sin necesidad de clonar previamente el repositorio.
 
-#### A. Sincronizar repositorio oficial de Claude
+#### A. Sincronizar repositorio oficial de Claude (Optimizado para Antigravity)
 
-Si no especificas nada, se descargarán o actualizarán todos los plugins oficiales.
+Por defecto, los scripts implementan **optimización inteligente de la ventana de contexto** (`Customization Token Budget`). Se instalan las herramientas esenciales de desarrollo (`feature-dev`, `code-review`, `code-simplifier`, `commit-commands`, `pr-review-toolkit`, `frontend-design`, `mcp-server-dev`, `hookify`, `playwright`, etc.) y **se omiten automáticamente los plugins redundantes o no esenciales**:
+* **LSPs de lenguajes (12 plugins):** `clangd`, `pyright`, `typescript-lsp`, `rust-analyzer`, etc. (*Antigravity IDE ya incluye soporte nativo integrado para estos lenguajes a través de su motor VS Code*).
+* **Herramientas exclusivas del CLI de Claude:** `receipts`, `session-report`, `claude-md-management`, `claude-security` (*diseñadas para `~/.claude/projects` y Claude Code CLI*).
+* **Puentes de mensajería externa:** `discord`, `telegram`, `imessage` (*inyectan skills persistentes de configuración/acceso en cada turno*).
+* **Herramientas de nicho:** `cwc-makers` (firmware M5Stack Cardputer), `math-olympiad`, `math-proof`.
+* **Servicios externos no configurados:** `asana`, `linear`, `gitlab`, `laravel-boost`, `fakechat`, `explanatory-output-style`.
+
+> 💡 **Limpieza automática:** Al ejecutar la sincronización estándar, el script también desinstala automáticamente los plugins excluidos que hayan quedado de versiones previas, liberando de inmediato tokens de personalización para evitar el aviso de *"Customization token budget exceeded"*.
 
 **Windows (PowerShell):**
 
 > ⚠️ **Importante:** Ejecuta tu terminal de PowerShell **como Administrador** para evitar errores de permisos con Git (`fatal: detected dubious ownership in repository`).
 
 ```powershell
+# Sincronización estándar optimizada (Recomendada)
 irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1 | iex
+
+# Para forzar la instalación de TODOS los plugins (incluyendo LSPs y nichos):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -All
+
+# Para realizar solo limpieza de plugins no esenciales instalados previamente:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -CleanUnneeded
 ```
 
 **macOS / Linux (Bash):**
 
 ```bash
+# Sincronización estándar optimizada (Recomendada)
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash
+
+# Para forzar la instalación de TODOS los plugins:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --all
+
+# Para realizar solo limpieza de plugins no esenciales:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --clean
 ```
 
 #### B. Instalar un plugin externo desde Git
@@ -155,10 +176,16 @@ curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/
 
 Si prefieres descargar y ejecutar el proceso usando los scripts locales de este repositorio:
 
-#### A. Sincronizar repositorio oficial
+#### A. Sincronizar repositorio oficial (Optimizado)
 
-* **Windows (Como Administrador):** `.\sync-claude-plugins.ps1`
-* **macOS / Linux:** `chmod +x sync-claude-plugins.sh && ./sync-claude-plugins.sh`
+* **Windows (Como Administrador):**
+  * Optimizado (recomendado): `.\sync-claude-plugins.ps1`
+  * Forzar todos: `.\sync-claude-plugins.ps1 -All`
+  * Solo limpieza: `.\sync-claude-plugins.ps1 -CleanUnneeded`
+* **macOS / Linux:**
+  * Optimizado (recomendado): `chmod +x sync-claude-plugins.sh && ./sync-claude-plugins.sh`
+  * Forzar todos: `./sync-claude-plugins.sh --all`
+  * Solo limpieza: `./sync-claude-plugins.sh --clean`
 
 #### B. Instalar un plugin externo (con escaneo de seguridad)
 
