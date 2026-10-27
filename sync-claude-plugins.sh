@@ -7,20 +7,70 @@ SILENT=false
 SKIP_SCAN=false
 INSTALL_ALL=false
 CLEAN_UNNEEDED=false
+INCLUDE_PLUGINS=()
+REMOVE_PLUGINS=()
 
 # Parse arguments
-for arg in "$@"; do
-    if [ "$arg" = "--silent" ] || [ "$arg" = "-s" ]; then
-        SILENT=true
-    elif [ "$arg" = "--skip-scan" ] || [ "$arg" = "--skip-security-scan" ]; then
-        SKIP_SCAN=true
-    elif [ "$arg" = "--all" ] || [ "$arg" = "-a" ]; then
-        INSTALL_ALL=true
-    elif [ "$arg" = "--clean" ] || [ "$arg" = "--clean-unneeded" ]; then
-        CLEAN_UNNEEDED=true
-    elif [ -n "$arg" ] && [[ "$arg" != -* ]]; then
-        EXTERNAL_URL="$arg"
-    fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --silent|-s)
+            SILENT=true
+            shift
+            ;;
+        --skip-scan|--skip-security-scan)
+            SKIP_SCAN=true
+            shift
+            ;;
+        --all|-a)
+            INSTALL_ALL=true
+            shift
+            ;;
+        --clean|--clean-unneeded)
+            CLEAN_UNNEEDED=true
+            shift
+            ;;
+        --include|-i)
+            IFS=',' read -ra ADDR <<< "$2"
+            for i in "${ADDR[@]}"; do
+                trimmed=$(echo "$i" | xargs)
+                [ -n "$trimmed" ] && INCLUDE_PLUGINS+=("$trimmed")
+            done
+            shift 2
+            ;;
+        --include=*)
+            val="${1#*=}"
+            IFS=',' read -ra ADDR <<< "$val"
+            for i in "${ADDR[@]}"; do
+                trimmed=$(echo "$i" | xargs)
+                [ -n "$trimmed" ] && INCLUDE_PLUGINS+=("$trimmed")
+            done
+            shift
+            ;;
+        --remove|-r|--delete)
+            IFS=',' read -ra ADDR <<< "$2"
+            for i in "${ADDR[@]}"; do
+                trimmed=$(echo "$i" | xargs)
+                [ -n "$trimmed" ] && REMOVE_PLUGINS+=("$trimmed")
+            done
+            shift 2
+            ;;
+        --remove=*|--delete=*)
+            val="${1#*=}"
+            IFS=',' read -ra ADDR <<< "$val"
+            for i in "${ADDR[@]}"; do
+                trimmed=$(echo "$i" | xargs)
+                [ -n "$trimmed" ] && REMOVE_PLUGINS+=("$trimmed")
+            done
+            shift
+            ;;
+        -*)
+            shift
+            ;;
+        *)
+            EXTERNAL_URL="$1"
+            shift
+            ;;
+    esac
 done
 
 log() {
@@ -38,6 +88,7 @@ run_git() {
 }
 
 PLUGINS_PATH="$HOME/.gemini/config/plugins"
+SKILLS_PATH="$HOME/.gemini/config/skills"
 SCRATCH_PATH="$HOME/.gemini/scratch"
 REPO_PATH="$SCRATCH_PATH/claude-plugins-official"
 REPO_URL="https://github.com/anthropics/claude-plugins-official.git"
@@ -72,6 +123,16 @@ DEFAULT_EXCLUDED_PLUGINS=(
 is_excluded_plugin() {
     local target="$1"
     for item in "${DEFAULT_EXCLUDED_PLUGINS[@]}"; do
+        if [ "$item" = "$target" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+is_included_plugin() {
+    local target="$1"
+    for item in "${INCLUDE_PLUGINS[@]}"; do
         if [ "$item" = "$target" ]; then
             return 0
         fi
@@ -203,7 +264,44 @@ except Exception:
 mkdir -p "$SCRATCH_PATH"
 mkdir -p "$PLUGINS_PATH"
 
-# 2. Function to install/update a plugin directory
+# 2. Function to remove a specific plugin or skill
+remove_target_plugin_or_skill() {
+    local target="$1"
+    [ -z "$target" ] && return
+    local found=false
+
+    # 1. Plugin folder
+    if [ -d "$PLUGINS_PATH/$target" ]; then
+        log "Removiendo plugin: $PLUGINS_PATH/$target..."
+        rm -rf "$PLUGINS_PATH/$target"
+        log "✅ Plugin '$target' eliminado con éxito."
+        found=true
+    fi
+
+    # 2. Global skill
+    if [ -d "$SKILLS_PATH/$target" ]; then
+        log "Removiendo skill global: $SKILLS_PATH/$target..."
+        rm -rf "$SKILLS_PATH/$target"
+        log "✅ Skill global '$target' eliminada con éxito."
+        found=true
+    fi
+
+    # 3. Nested skill in plugins
+    while IFS= read -r nested; do
+        if [ -n "$nested" ] && [ -d "$nested" ]; then
+            log "Removiendo skill anidada: $nested..."
+            rm -rf "$nested"
+            log "✅ Skill anidada '$target' eliminada con éxito."
+            found=true
+        fi
+    done < <(find "$PLUGINS_PATH" -type d -name "$target" 2>/dev/null)
+
+    if [ "$found" = false ]; then
+        log "⚠️ No se encontró ningún plugin o skill con el nombre '$target'."
+    fi
+}
+
+# 3. Function to install/update a plugin directory
 install_plugin() {
     local src_folder="$1"
     local force="${2:-false}"
@@ -211,8 +309,12 @@ install_plugin() {
 
     # Exclude non-essential, redundant, or boilerplate plugins
     if [ "$force" = false ] && [ "$INSTALL_ALL" = false ] && is_excluded_plugin "$plugin_name"; then
-        log "  [Omitido] $plugin_name (no esencial / redundante con Antigravity). Usa --all para forzar."
-        return
+        if is_included_plugin "$plugin_name"; then
+            log "  [Incluido explícitamente vía --include] $plugin_name..."
+        else
+            log "  [Omitido] $plugin_name (no esencial / redundante con Antigravity). Usa --include o --all para forzar."
+            return
+        fi
     fi
 
     local dest_folder="$PLUGINS_PATH/$plugin_name"
@@ -293,7 +395,19 @@ if len(parts) >= 3:
     done
 }
 
-# 3. Handle External Plugin Installation
+# 4. Handle Removal of Specific Plugins or Skills
+if [ ${#REMOVE_PLUGINS[@]} -gt 0 ]; then
+    log "Procesando eliminación de plugins o skills solicitados..."
+    for item in "${REMOVE_PLUGINS[@]}"; do
+        remove_target_plugin_or_skill "$item"
+    done
+    if [ -z "$EXTERNAL_URL" ] && [ "$INSTALL_ALL" = false ] && [ "$CLEAN_UNNEEDED" = false ] && [ ${#INCLUDE_PLUGINS[@]} -eq 0 ]; then
+        log "Operación de eliminación completada."
+        exit 0
+    fi
+fi
+
+# 5. Handle External Plugin Installation
 if [ -n "$EXTERNAL_URL" ]; then
     PLUGIN_NAME=$(basename "$EXTERNAL_URL" .git)
     TEMP_PATH="$SCRATCH_PATH/$PLUGIN_NAME"
@@ -341,11 +455,14 @@ if [ -n "$EXTERNAL_URL" ]; then
     exit 0
 fi
 
-# 4. Clean unneeded / non-essential plugins if requested or during standard sync
+# 6. Clean unneeded / non-essential plugins if requested or during standard sync
 if [ "$INSTALL_ALL" = false ]; then
     log "Optimizando ventana de contexto: verificando y removiendo plugins no esenciales..."
     removed_count=0
     for excluded in "${DEFAULT_EXCLUDED_PLUGINS[@]}"; do
+        if is_included_plugin "$excluded"; then
+            continue
+        fi
         installed_dir="$PLUGINS_PATH/$excluded"
         if [ -d "$installed_dir" ]; then
             log "  Removiendo plugin no esencial para liberar contexto: $excluded..."
@@ -363,7 +480,7 @@ if [ "$CLEAN_UNNEEDED" = true ]; then
     exit 0
 fi
 
-# 5. Regular Official Repo Sync
+# 7. Regular Official Repo Sync
 if [ -d "$REPO_PATH" ]; then
     log "Updating local repository..."
     pushd "$REPO_PATH" > /dev/null
@@ -424,16 +541,24 @@ To perform the action:
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -All`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --all`
 
-   **C. To Clean / Remove Unneeded Plugins Only:**
+   **C. To Include Specific Plugins Otherwise Excluded by Default:**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -Include "math-olympiad,pyright-lsp"`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --include "math-olympiad,pyright-lsp"`
+
+   **D. To Remove a Specific Plugin or Skill:**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -Remove "NOMBRE_PLUGIN_O_SKILL"`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --remove "NOMBRE_PLUGIN_O_SKILL"`
+
+   **E. To Clean / Remove Unneeded Plugins Only:**
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -CleanUnneeded`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --clean`
 
-   **D. To Install an External Plugin (User provides a Git URL):**
+   **F. To Install an External Plugin (User provides a Git URL):**
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"`
    *(Note: External plugins are automatically scanned with NVIDIA SkillSpector. Pass -SkipScan or --skip-scan to bypass)*
 
-   **E. To Audit Any Plugin or Skill On-Demand:**
+   **G. To Audit Any Plugin or Skill On-Demand:**
    - On Windows/macOS/Linux: `skillspector scan "PATH_TO_SKILL" --no-llm`
 
 2. Report the output of the execution to the user:

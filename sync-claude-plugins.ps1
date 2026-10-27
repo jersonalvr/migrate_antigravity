@@ -3,11 +3,27 @@
 
 param(
     [string]$ExternalUrl = "",
+    [string[]]$Include = @(),
+    [string[]]$Remove = @(),
     [switch]$Silent,
     [switch]$SkipScan,
     [switch]$All,
     [switch]$CleanUnneeded
 )
+
+$IncludeList = @()
+if ($Include) {
+    foreach ($item in $Include) {
+        $IncludeList += ($item -split ',').ForEach({ $_.Trim() }) | Where-Object { $_ -ne "" }
+    }
+}
+
+$RemoveList = @()
+if ($Remove) {
+    foreach ($item in $Remove) {
+        $RemoveList += ($item -split ',').ForEach({ $_.Trim() }) | Where-Object { $_ -ne "" }
+    }
+}
 
 function Write-Log {
     param([string]$Message, [string]$Color = "White")
@@ -17,6 +33,7 @@ function Write-Log {
 }
 
 $PluginsPath = Join-Path $Home ".gemini\config\plugins"
+$SkillsPath = Join-Path $Home ".gemini\config\skills"
 $ScratchPath = Join-Path $Home ".gemini\scratch"
 $RepoPath = Join-Path $ScratchPath "claude-plugins-official"
 $RepoUrl = "https://github.com/anthropics/claude-plugins-official.git"
@@ -183,14 +200,58 @@ if (-not (Test-Path $PluginsPath)) {
     New-Item -ItemType Directory -Path $PluginsPath -Force | Out-Null
 }
 
-# 2. Function to install/update a plugin directory
+# 2. Function to remove a specific plugin or skill
+function Remove-TargetPluginOrSkill([string]$Target) {
+    $Target = $Target.Trim()
+    if ([string]::IsNullOrWhiteSpace($Target)) { return }
+    $Found = $false
+
+    # 1. Plugin folder in ~/.gemini/config/plugins/<Target>
+    $PluginDir = Join-Path $PluginsPath $Target
+    if (Test-Path $PluginDir) {
+        Write-Log "Removiendo plugin: $PluginDir..." -Color Yellow
+        Remove-Item -Recurse -Force $PluginDir -ErrorAction SilentlyContinue
+        Write-Log "✅ Plugin '$Target' eliminado con éxito." -Color Green
+        $Found = $true
+    }
+
+    # 2. Global skill folder in ~/.gemini/config/skills/<Target>
+    $SkillDir = Join-Path $SkillsPath $Target
+    if (Test-Path $SkillDir) {
+        Write-Log "Removiendo skill global: $SkillDir..." -Color Yellow
+        Remove-Item -Recurse -Force $SkillDir -ErrorAction SilentlyContinue
+        Write-Log "✅ Skill global '$Target' eliminada con éxito." -Color Green
+        $Found = $true
+    }
+
+    # 3. Nested skill directory with that name inside any plugin
+    $NestedSkills = Get-ChildItem -Path $PluginsPath -Directory -Recurse -Filter $Target -ErrorAction SilentlyContinue | Where-Object {
+        (Test-Path (Join-Path $_.FullName "SKILL.md")) -or ($_.Parent.Name -eq "skills")
+    }
+    foreach ($Nested in $NestedSkills) {
+        Write-Log "Removiendo skill anidada: $($Nested.FullName)..." -Color Yellow
+        Remove-Item -Recurse -Force $Nested.FullName -ErrorAction SilentlyContinue
+        Write-Log "✅ Skill anidada '$Target' en plugin '$($Nested.Parent.Parent.Name)' eliminada con éxito." -Color Green
+        $Found = $true
+    }
+
+    if (-not $Found) {
+        Write-Log "⚠️ No se encontró ningún plugin o skill con el nombre '$Target' en $PluginsPath ni en $SkillsPath." -Color Yellow
+    }
+}
+
+# 3. Function to install/update a plugin directory
 function Install-Plugin($SrcFolder, [switch]$Force) {
     $PluginName = Split-Path $SrcFolder -Leaf
     
     # Exclude non-essential, redundant, or boilerplate plugins
     if (-not $Force -and -not $All -and ($DefaultExcludedPlugins -contains $PluginName)) {
-        Write-Log "  [Omitido] $PluginName (no esencial / redundante con Antigravity). Usa -All para forzar." -Color DarkGray
-        return
+        if ($IncludeList -contains $PluginName) {
+            Write-Log "  [Incluido explícitamente vía -Include] $PluginName..." -Color Cyan
+        } else {
+            Write-Log "  [Omitido] $PluginName (no esencial / redundante con Antigravity). Usa -Include o -All para forzar." -Color DarkGray
+            return
+        }
     }
 
     $DestFolder = Join-Path $PluginsPath $PluginName
@@ -285,7 +346,19 @@ function Install-Plugin($SrcFolder, [switch]$Force) {
     }
 }
 
-# 3. Handle External Plugin Installation (if URL is provided)
+# 4. Handle Removal of Specific Plugins or Skills
+if ($RemoveList.Count -gt 0) {
+    Write-Log "Procesando eliminación de plugins o skills solicitados..." -Color Cyan
+    foreach ($Item in $RemoveList) {
+        Remove-TargetPluginOrSkill $Item
+    }
+    if ($ExternalUrl -eq "" -and -not $All -and -not $CleanUnneeded -and $IncludeList.Count -eq 0) {
+        Write-Log "Operación de eliminación completada." -Color Green
+        return
+    }
+}
+
+# 5. Handle External Plugin Installation (if URL is provided)
 if ($ExternalUrl -ne "") {
     $PluginName = ($ExternalUrl -split '/')[-1] -replace '\.git$',''
     $TempPath = Join-Path $ScratchPath $PluginName
@@ -339,11 +412,14 @@ if ($ExternalUrl -ne "") {
     return
 }
 
-# 4. Clean unneeded / non-essential plugins if requested or during standard sync
+# 6. Clean unneeded / non-essential plugins if requested or during standard sync
 if (-not $All) {
     Write-Log "Optimizando ventana de contexto: verificando y removiendo plugins no esenciales..." -Color Cyan
     $RemovedCount = 0
     foreach ($Excluded in $DefaultExcludedPlugins) {
+        if ($IncludeList -contains $Excluded) {
+            continue
+        }
         $InstalledDir = Join-Path $PluginsPath $Excluded
         if (Test-Path $InstalledDir) {
             Write-Log "  Removiendo plugin no esencial para liberar contexto: $Excluded..." -Color Yellow
@@ -361,7 +437,7 @@ if ($CleanUnneeded) {
     return
 }
 
-# 5. Regular Official Repo Sync
+# 7. Regular Official Repo Sync
 if (Test-Path $RepoPath) {
     Write-Log "Updating local repository..." -Color Cyan
     Push-Location $RepoPath
@@ -421,16 +497,24 @@ To perform the action:
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -All`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --all`
 
-   **C. To Clean / Remove Unneeded Plugins Only:**
+   **C. To Include Specific Plugins Otherwise Excluded by Default:**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -Include "math-olympiad,pyright-lsp"`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --include "math-olympiad,pyright-lsp"`
+
+   **D. To Remove a Specific Plugin or Skill:**
+   - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -Remove "NOMBRE_PLUGIN_O_SKILL"`
+   - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --remove "NOMBRE_PLUGIN_O_SKILL"`
+
+   **E. To Clean / Remove Unneeded Plugins Only:**
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -CleanUnneeded`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh --clean`
 
-   **D. To Install an External Plugin (User provides a Git URL):**
+   **F. To Install an External Plugin (User provides a Git URL):**
    - On Windows: `powershell -ExecutionPolicy Bypass -File $Home\.gemini\config\plugins\sync-claude-plugins.ps1 -ExternalUrl "URL_HERE"`
    - On macOS/Linux: `bash $HOME/.gemini/config/plugins/sync-claude-plugins.sh "URL_HERE"`
    *(Note: External plugins are automatically scanned with NVIDIA SkillSpector. Pass -SkipScan or --skip-scan to bypass)*
 
-   **E. To Audit Any Plugin or Skill On-Demand:**
+   **G. To Audit Any Plugin or Skill On-Demand:**
    - On Windows/macOS/Linux: `skillspector scan "PATH_TO_SKILL" --no-llm`
 
 2. Report the output of the execution to the user:

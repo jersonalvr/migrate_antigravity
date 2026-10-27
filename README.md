@@ -124,6 +124,12 @@ Por defecto, los scripts implementan **optimización inteligente de la ventana d
 # Sincronización estándar optimizada (Recomendada)
 irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1 | iex
 
+# Para incluir plugins específicos que normalmente se excluirían (ej: math-olympiad, pyright-lsp):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -Include "math-olympiad,pyright-lsp"
+
+# Para eliminar una skill o plugin específico (ej: science, math-olympiad):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -Remove "science"
+
 # Para forzar la instalación de TODOS los plugins (incluyendo LSPs y nichos):
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -All
 
@@ -136,6 +142,12 @@ irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-c
 ```bash
 # Sincronización estándar optimizada (Recomendada)
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash
+
+# Para incluir plugins específicos que normalmente se excluirían:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --include "math-olympiad,pyright-lsp"
+
+# Para eliminar una skill o plugin específico:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --remove "science"
 
 # Para forzar la instalación de TODOS los plugins:
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --all
@@ -180,10 +192,14 @@ Si prefieres descargar y ejecutar el proceso usando los scripts locales de este 
 
 * **Windows (Como Administrador):**
   * Optimizado (recomendado): `.\sync-claude-plugins.ps1`
+  * Incluir plugins excluidos: `.\sync-claude-plugins.ps1 -Include "math-olympiad,pyright-lsp"`
+  * Eliminar plugin o skill: `.\sync-claude-plugins.ps1 -Remove "science"`
   * Forzar todos: `.\sync-claude-plugins.ps1 -All`
   * Solo limpieza: `.\sync-claude-plugins.ps1 -CleanUnneeded`
 * **macOS / Linux:**
   * Optimizado (recomendado): `chmod +x sync-claude-plugins.sh && ./sync-claude-plugins.sh`
+  * Incluir plugins excluidos: `./sync-claude-plugins.sh --include "math-olympiad,pyright-lsp"`
+  * Eliminar plugin o skill: `./sync-claude-plugins.sh --remove "science"`
   * Forzar todos: `./sync-claude-plugins.sh --all`
   * Solo limpieza: `./sync-claude-plugins.sh --clean`
 
