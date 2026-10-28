@@ -426,9 +426,14 @@ import os, sys, re, shutil
 from collections import defaultdict
 
 home = os.path.expanduser("~")
+legacy_skills_dir = os.path.join(home, ".gemini", "antigravity", "skills")
+legacy_dirs = []
+if os.path.exists(legacy_skills_dir):
+    legacy_dirs = [d for d in os.listdir(legacy_skills_dir) if os.path.isdir(os.path.join(legacy_skills_dir, d))]
+
 roots = [
     ("Config Skills (~/.gemini/config/skills)", os.path.join(home, ".gemini", "config", "skills")),
-    ("Antigravity Legacy Skills (~/.gemini/antigravity/skills)", os.path.join(home, ".gemini", "antigravity", "skills")),
+    ("Antigravity Legacy Skills (~/.gemini/antigravity/skills)", legacy_skills_dir),
     ("Installed Plugins (~/.gemini/config/plugins)", os.path.join(home, ".gemini", "config", "plugins")),
 ]
 
@@ -460,20 +465,29 @@ for source_name, root_path in roots:
             })
 
 duplicates = {k: v for k, v in skills.items() if len(v) > 1}
+has_issues = bool(duplicates) or bool(legacy_dirs)
 
-print("\n--- ESCANEO DE SKILLS DUPLICADAS EN ANTIGRAVITY ---")
-if not duplicates:
-    print("✅ ¡Excelente! No se encontraron skills duplicadas en tu entorno.")
+print("\n--- ESCANEO DE SKILLS DUPLICADAS Y LEGACY EN ANTIGRAVITY ---")
+if not has_issues:
+    print("[OK] Excelente: No se encontraron skills duplicadas ni legacy en tu entorno.")
     sys.exit(0)
 
-print(f"⚠️ Se encontraron {len(duplicates)} skills con definiciones duplicadas:\n")
-for name, entries in duplicates.items():
-    print(f"  • Skill: \x27{name}\x27 ({len(entries)} copias encontradas)")
-    for ent in entries:
-        print(f"      - [{ent[\x27source\x27]}] {ent[\x27file\x27]}")
+if duplicates:
+    print(f"[AVISO] Se encontraron {len(duplicates)} skills con definiciones duplicadas:\n")
+    for name, entries in duplicates.items():
+        print(f"  * Skill: \x27{name}\x27 ({len(entries)} copias encontradas)")
+        for ent in entries:
+            print(f"      - [{ent[\x27source\x27]}] {ent[\x27file\x27]}")
+    print("")
+
+if legacy_dirs:
+    print(f"[AVISO] Se detectaron {len(legacy_dirs)} skills legacy obsoletas en {legacy_skills_dir}:\n")
+    for ldir in legacy_dirs:
+        print(f"  * Legacy Skill obsoleta: \x27{ldir}\x27")
+    print("  (Nota: Las skills actuales residen en ~/.gemini/config/skills. Estas copias legacy consumen tokens innecesarios).\n")
 
 if auto_fix:
-    print("\nResolviendo duplicados para liberar el presupuesto de tokens de contexto...")
+    print("Resolviendo duplicados y purgando skills legacy obsoletas...")
     fixed = 0
     for name, entries in duplicates.items():
         legacy = [e for e in entries if "Antigravity Legacy Skills" in e["source"]]
@@ -492,10 +506,22 @@ if auto_fix:
                     print(f"  Eliminando copia redundante en plugin: {plg[\x27folder\x27]}...")
                     shutil.rmtree(plg["folder"], ignore_errors=True)
                     fixed += 1
+
+    if os.path.exists(legacy_skills_dir):
+        for rem in os.listdir(legacy_skills_dir):
+            full_rem = os.path.join(legacy_skills_dir, rem)
+            if os.path.isdir(full_rem):
+                print(f"  Eliminando skill legacy obsoleta: {full_rem}...")
+                shutil.rmtree(full_rem, ignore_errors=True)
+                fixed += 1
+        old_manifest = os.path.join(legacy_skills_dir, ".datacloud_skills_manifest")
+        if os.path.exists(old_manifest):
+            os.remove(old_manifest)
+
     if fixed > 0:
-        print(f"✅ Se eliminaron {fixed} copias duplicadas de skills. Reinicia Antigravity IDE.")
+        print(f"[OK] Se eliminaron {fixed} copias duplicadas / skills legacy. Reinicia Antigravity IDE.")
 else:
-    print("\n💡 Para resolver automáticamente estas duplicaciones y liberar tokens, ejecuta:")
+    print("[INFO] Para resolver automáticamente y liberar tokens, ejecuta:")
     print("   bash sync-claude-plugins.sh --fix-duplicates")
 ' "$auto_fix"
 }

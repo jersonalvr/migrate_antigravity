@@ -318,11 +318,17 @@ function Remove-TargetPluginOrSkill([string]$Target) {
 
 # 3. Functions for Duplicate Detection and Resolution
 function Find-DuplicateSkills([switch]$AutoFix) {
-    Write-Log "`n--- ESCANEO DE SKILLS DUPLICADAS EN ANTIGRAVITY ---" -Color Cyan
+    Write-Log "`n--- ESCANEO DE SKILLS DUPLICADAS Y LEGACY EN ANTIGRAVITY ---" -Color Cyan
     
+    $LegacySkillsDir = Join-Path $Home ".gemini\antigravity\skills"
+    $LegacyDirs = @()
+    if (Test-Path $LegacySkillsDir) {
+        $LegacyDirs = Get-ChildItem -Path $LegacySkillsDir -Directory -ErrorAction SilentlyContinue
+    }
+
     $Roots = @(
         @{ Name = "Config Skills (~/.gemini/config/skills)"; Path = $SkillsPath },
-        @{ Name = "Antigravity Legacy Skills (~/.gemini/antigravity/skills)"; Path = (Join-Path $Home ".gemini\antigravity\skills") },
+        @{ Name = "Antigravity Legacy Skills (~/.gemini/antigravity/skills)"; Path = $LegacySkillsDir },
         @{ Name = "Installed Plugins (~/.gemini/config/plugins)"; Path = $PluginsPath }
     )
 
@@ -350,61 +356,88 @@ function Find-DuplicateSkills([switch]$AutoFix) {
     }
 
     $Duplicates = $SkillEntries | Group-Object Name | Where-Object { $_.Count -gt 1 }
+    $HasIssues = ($Duplicates -and $Duplicates.Count -gt 0) -or ($LegacyDirs -and $LegacyDirs.Count -gt 0)
 
-    if (-not $Duplicates -or $Duplicates.Count -eq 0) {
-        Write-Log "[OK] Excelente: No se encontraron skills duplicadas en tu entorno." -Color Green
+    if (-not $HasIssues) {
+        Write-Log "[OK] Excelente: No se encontraron skills duplicadas ni legacy en tu entorno." -Color Green
         return
     }
 
-    Write-Log "[AVISO] Se encontraron $($Duplicates.Count) skills con definiciones duplicadas:`n" -Color Yellow
-    
-    foreach ($Dup in $Duplicates) {
-        Write-Log "  * Skill: '$($Dup.Name)' ($($Dup.Count) copias encontradas)" -Color Yellow
-        foreach ($Inst in $Dup.Group) {
-            Write-Log "      - [$($Inst.Source)] $($Inst.File)" -Color DarkGray
+    if ($Duplicates -and $Duplicates.Count -gt 0) {
+        Write-Log "[AVISO] Se encontraron $($Duplicates.Count) skills con definiciones duplicadas:`n" -Color Yellow
+        foreach ($Dup in $Duplicates) {
+            Write-Log "  * Skill: '$($Dup.Name)' ($($Dup.Count) copias encontradas)" -Color Yellow
+            foreach ($Inst in $Dup.Group) {
+                Write-Log "      - [$($Inst.Source)] $($Inst.File)" -Color DarkGray
+            }
         }
+        Write-Log ""
     }
-    Write-Log ""
+
+    if ($LegacyDirs -and $LegacyDirs.Count -gt 0) {
+        Write-Log "[AVISO] Se detectaron $($LegacyDirs.Count) skills legacy obsoletas en $($LegacySkillsDir):`n" -Color Yellow
+        foreach ($LDir in $LegacyDirs) {
+            Write-Log "  * Legacy Skill obsoleta: '$($LDir.Name)' ($($LDir.FullName))" -Color Yellow
+        }
+        Write-Log "  (Nota: Las skills actuales residen en ~/.gemini/config/skills. Estas copias legacy consumen tokens innecesarios).`n" -Color DarkGray
+    }
 
     if ($AutoFix -or $FixDuplicates) {
-        Resolve-DuplicateSkills -Duplicates $Duplicates
+        Resolve-DuplicateSkills -Duplicates $Duplicates -LegacyDirs $LegacyDirs
     } else {
-        Write-Log "[INFO] Para resolver automaticamente estas duplicaciones y liberar tokens, ejecuta:" -Color Cyan
+        Write-Log "[INFO] Para resolver automaticamente y liberar tokens, ejecuta:" -Color Cyan
         Write-Log "   .\sync-claude-plugins.ps1 -FixDuplicates" -Color White
     }
 }
 
-function Resolve-DuplicateSkills($Duplicates) {
-    Write-Log "Resolviendo duplicados para liberar el presupuesto de tokens de contexto..." -Color Cyan
+function Resolve-DuplicateSkills($Duplicates, $LegacyDirs) {
+    Write-Log "Resolviendo duplicados y purgando skills legacy obsoletas..." -Color Cyan
     $FixedCount = 0
     
-    foreach ($Dup in $Duplicates) {
-        $LegacyCopies = $Dup.Group | Where-Object { $_.Source -like "*Antigravity Legacy Skills*" }
-        $ConfigCopies = $Dup.Group | Where-Object { $_.Source -like "*Config Skills*" }
-        
-        # Caso 1: Duplicado entre Antigravity Legacy y Config Skills
-        if ($LegacyCopies -and $ConfigCopies) {
-            foreach ($Leg in $LegacyCopies) {
-                Write-Log "  Eliminando copia legacy duplicada: $($Leg.Folder)..." -Color Yellow
-                Remove-Item -Recurse -Force $Leg.Folder -ErrorAction SilentlyContinue
-                $FixedCount++
-            }
-        }
-        # Caso 2: Duplicado entre un Plugin y Config Skills
-        else {
-            $PluginCopies = $Dup.Group | Where-Object { $_.Source -like "*Installed Plugins*" }
-            if ($ConfigCopies -and $PluginCopies) {
-                foreach ($Plg in $PluginCopies) {
-                    Write-Log "  Eliminando copia redundante en plugin: $($Plg.Folder)..." -Color Yellow
-                    Remove-Item -Recurse -Force $Plg.Folder -ErrorAction SilentlyContinue
+    if ($Duplicates) {
+        foreach ($Dup in $Duplicates) {
+            $LegacyCopies = $Dup.Group | Where-Object { $_.Source -like "*Antigravity Legacy Skills*" }
+            $ConfigCopies = $Dup.Group | Where-Object { $_.Source -like "*Config Skills*" }
+            
+            # Caso 1: Duplicado entre Antigravity Legacy y Config Skills
+            if ($LegacyCopies -and $ConfigCopies) {
+                foreach ($Leg in $LegacyCopies) {
+                    Write-Log "  Eliminando copia legacy duplicada: $($Leg.Folder)..." -Color Yellow
+                    Remove-Item -Recurse -Force $Leg.Folder -ErrorAction SilentlyContinue
                     $FixedCount++
+                }
+            }
+            # Caso 2: Duplicado entre un Plugin y Config Skills
+            else {
+                $PluginCopies = $Dup.Group | Where-Object { $_.Source -like "*Installed Plugins*" }
+                if ($ConfigCopies -and $PluginCopies) {
+                    foreach ($Plg in $PluginCopies) {
+                        Write-Log "  Eliminando copia redundante en plugin: $($Plg.Folder)..." -Color Yellow
+                        Remove-Item -Recurse -Force $Plg.Folder -ErrorAction SilentlyContinue
+                        $FixedCount++
+                    }
                 }
             }
         }
     }
+
+    # Eliminar cualquier carpeta legacy restante en ~/.gemini/antigravity/skills
+    $LegacySkillsDir = Join-Path $Home ".gemini\antigravity\skills"
+    if (Test-Path $LegacySkillsDir) {
+        $RemainingLegacy = Get-ChildItem -Path $LegacySkillsDir -Directory -ErrorAction SilentlyContinue
+        foreach ($Rem in $RemainingLegacy) {
+            Write-Log "  Eliminando skill legacy obsoleta: $($Rem.FullName)..." -Color Yellow
+            Remove-Item -Recurse -Force $Rem.FullName -ErrorAction SilentlyContinue
+            $FixedCount++
+        }
+        $OldManifest = Join-Path $LegacySkillsDir ".datacloud_skills_manifest"
+        if (Test-Path $OldManifest) {
+            Remove-Item -Force $OldManifest -ErrorAction SilentlyContinue
+        }
+    }
     
     if ($FixedCount -gt 0) {
-        Write-Log "[OK] Se eliminaron $FixedCount copias duplicadas de skills. Reinicia Antigravity IDE para ver el presupuesto en verde." -Color Green
+        Write-Log "[OK] Se eliminaron $FixedCount copias duplicadas / skills legacy. Reinicia Antigravity IDE para ver el presupuesto en verde." -Color Green
     } else {
         Write-Log "No se requirieron cambios adicionales." -Color DarkGray
     }
