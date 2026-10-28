@@ -435,26 +435,121 @@ function Pause-Menu {
     [void][Console]::ReadLine()
 }
 
-function Show-InteractiveMenu {
-    do {
+function Select-InteractiveOption {
+    param (
+        [array]$Options,
+        [int]$DefaultIndex = 0
+    )
+
+    $SelectedIndex = $DefaultIndex
+
+    # Verificar si la entrada estándar está redirigida
+    $IsRedirected = $false
+    try {
+        $IsRedirected = [Console]::IsInputRedirected
+    } catch {
+        $IsRedirected = $true
+    }
+
+    if ($IsRedirected) {
         Clear-Host
         Write-Host "==========================================================" -ForegroundColor Cyan
         Write-Host "     Antigravity Plugins & Skills Manager v1.5.0          " -ForegroundColor Yellow
         Write-Host "==========================================================" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "1) [SYNC]  Sincronizacion Estandar Optimizada (Recomendado)" -ForegroundColor White
-        Write-Host "   Instala plugins esenciales para desarrollo omitiendo redundantes y LSPs." -ForegroundColor DarkGray
-        Write-Host ""
-        
+        for ($i = 0; $i -lt $Options.Count; $i++) {
+            $num = $i + 1
+            Write-Host "$num) $($Options[$i].Title)" -ForegroundColor White
+            if ($Options[$i].Desc) {
+                Write-Host "   $($Options[$i].Desc)" -ForegroundColor DarkGray
+            }
+        }
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        $choice = Read-Host "Selecciona una opcion [1-$($Options.Count)]"
+        $idx = 0
+        if ([int]::TryParse($choice, [ref]$idx) -and $idx -ge 1 -and $idx -le $Options.Count) {
+            return ($idx - 1)
+        }
+        return $DefaultIndex
+    }
+
+    try { [Console]::CursorVisible = $false } catch {}
+
+    while ($true) {
+        Clear-Host
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        Write-Host "     Antigravity Plugins & Skills Manager v1.5.0          " -ForegroundColor Yellow
+        Write-Host "==========================================================" -ForegroundColor Cyan
+        Write-Host " Usa las flechas [Arriba/Abajo] para navegar y [Enter] para seleccionar.`n" -ForegroundColor DarkGray
+
+        for ($i = 0; $i -lt $Options.Count; $i++) {
+            $opt = $Options[$i]
+            $num = $i + 1
+            if ($i -eq $SelectedIndex) {
+                Write-Host " > $num) $($opt.Title)" -ForegroundColor Cyan
+                if ($opt.Desc) {
+                    Write-Host "      $($opt.Desc)" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "   $num) $($opt.Title)" -ForegroundColor White
+                if ($opt.Desc) {
+                    Write-Host "      $($opt.Desc)" -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        Write-Host "`n==========================================================" -ForegroundColor Cyan
+        Write-Host " [Enter] Seleccionar   [1-$($Options.Count)] Atajo numerico   [Q/Esc] Salir" -ForegroundColor DarkGray
+
+        try {
+            $keyInfo = [System.Console]::ReadKey($true)
+            switch ($keyInfo.Key) {
+                ([System.ConsoleKey]::UpArrow) {
+                    $SelectedIndex = ($SelectedIndex - 1 + $Options.Count) % $Options.Count
+                }
+                ([System.ConsoleKey]::DownArrow) {
+                    $SelectedIndex = ($SelectedIndex + 1) % $Options.Count
+                }
+                ([System.ConsoleKey]::Enter) {
+                    try { [Console]::CursorVisible = $true } catch {}
+                    return $SelectedIndex
+                }
+                ([System.ConsoleKey]::Escape) {
+                    try { [Console]::CursorVisible = $true } catch {}
+                    return -1
+                }
+                default {
+                    $ch = $keyInfo.KeyChar
+                    if ($ch -eq 'q' -or $ch -eq 'Q') {
+                        try { [Console]::CursorVisible = $true } catch {}
+                        return -1
+                    }
+                    if ($ch -ge '1' -and $ch -le [char]('0' + [math]::Min($Options.Count, 9))) {
+                        try { [Console]::CursorVisible = $true } catch {}
+                        return ([int][string]$ch - 1)
+                    }
+                }
+            }
+        } catch {
+            try { [Console]::CursorVisible = $true } catch {}
+            $choice = Read-Host "Selecciona una opcion [1-$($Options.Count)]"
+            $idx = 0
+            if ([int]::TryParse($choice, [ref]$idx) -and $idx -ge 1 -and $idx -le $Options.Count) {
+                return ($idx - 1)
+            }
+            return $DefaultIndex
+        }
+    }
+}
+
+function Show-InteractiveMenu {
+    $CurrentIndex = 0
+    do {
         $LegacySkillsDir = Join-Path $Home ".gemini\antigravity\skills"
         $DupeWarning = ""
         if (Test-Path $LegacySkillsDir) {
             $DupeCount = (Get-ChildItem -Path $LegacySkillsDir -Directory -ErrorAction SilentlyContinue).Count
             if ($DupeCount -gt 0) { $DupeWarning = " -- AVISO: ($DupeCount skills legacy detectadas)" }
         }
-        Write-Host "2) [SCAN]  Buscar y Resolver Skills Duplicadas$DupeWarning" -ForegroundColor White
-        Write-Host "   Detecta skills clonadas (~/.gemini/antigravity vs ~/.gemini/config) y libera tokens." -ForegroundColor DarkGray
-        Write-Host ""
 
         $ConfigJsonPath = Join-Path (Join-Path $Home ".gemini") "config\config.json"
         $ConfigObj = $null
@@ -463,39 +558,39 @@ function Show-InteractiveMenu {
         }
 
         $ScienceInstalled = ((Test-Path (Join-Path $PluginsPath "science")) -or ($ConfigObj -and $ConfigObj.plugins.science.enabled -eq $true))
-        $SciStatus = if ($ScienceInstalled) { "[INSTALADO / HABILITADO - 37 skills]" } else { "[DESACTIVADO]" }
-        $SciColor = if ($ScienceInstalled) { "Yellow" } else { "DarkGray" }
-        Write-Host "3) [BIO]   Gestionar Plugins de Ciencia (DeepMind Science) $SciStatus" -ForegroundColor White
-        Write-Host "   AlphaFold, ChemBL, PDB, Genomica (consume ~5.500 tokens de contexto)" -ForegroundColor $SciColor
-        Write-Host ""
+        $SciStatus = if ($ScienceInstalled) { "[HABILITADO - 37 skills]" } else { "[DESACTIVADO]" }
 
         $PluginDevInstalled = ((Test-Path (Join-Path $PluginsPath "plugin-dev")) -or ($ConfigObj -and $ConfigObj.plugins.'plugin-dev'.enabled -eq $true))
-        $PDevStatus = if ($PluginDevInstalled) { "[INSTALADO / HABILITADO - 7 skills]" } else { "[DESACTIVADO]" }
-        $PDevColor = if ($PluginDevInstalled) { "Yellow" } else { "DarkGray" }
-        Write-Host "4) [DEV]   Gestionar Herramientas de Creacion de Plugins (plugin-dev) $PDevStatus" -ForegroundColor White
-        Write-Host "   Skills para crear plugins, hooks y commands de Claude (consume ~1.200 tokens)" -ForegroundColor $PDevColor
-        Write-Host ""
+        $PDevStatus = if ($PluginDevInstalled) { "[HABILITADO - 7 skills]" } else { "[DESACTIVADO]" }
 
         $TasteInstalled = ((Test-Path (Join-Path $PluginsPath "taste-skill")) -or (Test-Path (Join-Path $ScratchPath "taste-skill")) -or ($ConfigObj -and $ConfigObj.plugins.'taste-skill'.enabled -eq $true))
-        $TasteStatus = if ($TasteInstalled) { "[INSTALADO / HABILITADO - 13 skills]" } else { "[DESACTIVADO]" }
-        $TasteColor = if ($TasteInstalled) { "Yellow" } else { "DarkGray" }
-        Write-Host "5) [UI]    Gestionar Plugins de Frontend (taste-skill) $TasteStatus" -ForegroundColor White
-        Write-Host "   13 estilos de frontend (brutalist, minimalist, etc. - consume ~1.800 tokens)" -ForegroundColor $TasteColor
-        Write-Host ""
+        $TasteStatus = if ($TasteInstalled) { "[HABILITADO - 13 skills]" } else { "[DESACTIVADO]" }
 
-        Write-Host "6) [CLEAN] Limpiar todos los plugins no esenciales (Liberar tokens inmediatamente)" -ForegroundColor White
-        Write-Host "7) [GIT]   Instalar Plugin Externo desde URL de Git (con SkillSpector)" -ForegroundColor White
-        Write-Host "8) [ALL]   Sincronizar TODO sin filtros (-All - instala todos los plugins oficiales)" -ForegroundColor White
-        Write-Host "9) [SALIR] Salir" -ForegroundColor Red
-        Write-Host "==========================================================" -ForegroundColor Cyan
-        
-        $Choice = Read-Host "Selecciona una opcion [1-9]"
-        switch ($Choice) {
-            "1" {
+        $MenuItems = @(
+            @{ Id = "1"; Title = "[SYNC]  Sincronizacion Estandar Optimizada (Recomendado)"; Desc = "Instala plugins esenciales para desarrollo omitiendo redundantes y LSPs." },
+            @{ Id = "2"; Title = "[SCAN]  Buscar y Resolver Skills Duplicadas$DupeWarning"; Desc = "Detecta skills clonadas (~/.gemini/antigravity vs ~/.gemini/config) y libera tokens." },
+            @{ Id = "3"; Title = "[BIO]   Gestionar Plugins de Ciencia (DeepMind Science) $SciStatus"; Desc = "AlphaFold, ChemBL, PDB, Genomica (consume ~5.500 tokens de contexto)." },
+            @{ Id = "4"; Title = "[DEV]   Gestionar Herramientas de Creacion de Plugins (plugin-dev) $PDevStatus"; Desc = "Skills para crear plugins, hooks y commands de Claude (consume ~1.200 tokens)." },
+            @{ Id = "5"; Title = "[UI]    Gestionar Plugins de Frontend (taste-skill) $TasteStatus"; Desc = "13 estilos de frontend (brutalist, minimalist, etc. - consume ~1.800 tokens)." },
+            @{ Id = "6"; Title = "[CLEAN] Limpiar todos los plugins no esenciales (Liberar tokens inmediatamente)"; Desc = "Desactiva en config.json plugins innecesarios y elimina carpetas residuales." },
+            @{ Id = "7"; Title = "[GIT]   Instalar Plugin Externo desde URL de Git (con SkillSpector)"; Desc = "Clona e instala un repositorio validando previamente la seguridad con NVIDIA SkillSpector." },
+            @{ Id = "8"; Title = "[ALL]   Sincronizar TODO sin filtros (-All - instala todos los plugins oficiales)"; Desc = "Instala toda la coleccion oficial sin exclusiones (puede exceder presupuesto)." },
+            @{ Id = "9"; Title = "[SALIR] Salir"; Desc = "Cerrar el gestor de plugins y regresar a la terminal." }
+        )
+
+        $ChoiceIndex = Select-InteractiveOption -Options $MenuItems -DefaultIndex $CurrentIndex
+        if ($ChoiceIndex -eq -1 -or $ChoiceIndex -eq 8) {
+            Write-Host "`nOperacion cancelada." -ForegroundColor Yellow
+            exit 0
+        }
+
+        $CurrentIndex = $ChoiceIndex
+        switch ($ChoiceIndex) {
+            0 {
                 Write-Host "`nIniciando sincronizacion optimizada..." -ForegroundColor Cyan
                 return "Sync"
             }
-            "2" {
+            1 {
                 Write-Host "`nEscaneando skills duplicadas..." -ForegroundColor Cyan
                 Find-DuplicateSkills
                 $Fix = Read-Host "`nDeseas resolver automaticamente las duplicaciones eliminando copias redundantes? [S/n]"
@@ -504,14 +599,14 @@ function Show-InteractiveMenu {
                 }
                 Pause-Menu
             }
-            "3" {
+            2 {
                 if ($ScienceInstalled) {
-                    $Resp = Read-Host "`nEl paquete 'science' esta instalado (37 skills / ~5.500 tokens). Deseas DESINSTALARLO para liberar contexto? [S/n]"
+                    $Resp = Read-Host "`nEl paquete 'science' esta habilitado (37 skills / ~5.500 tokens). Deseas DESACTIVARLO para liberar contexto? [S/n]"
                     if ($Resp -ne "n" -and $Resp -ne "N") {
                         Remove-TargetPluginOrSkill "science"
                     }
                 } else {
-                    $Resp = Read-Host "`nDeseas INSTALAR el paquete 'science' (DeepMind Science Skills - 37 skills)? [s/N]"
+                    $Resp = Read-Host "`nDeseas HABILITAR / INSTALAR el paquete 'science' (DeepMind Science Skills - 37 skills)? [s/N]"
                     if ($Resp -eq "s" -or $Resp -eq "S") {
                         Install-ScienceSkills
                         Update-PluginConfigEntry -PluginName "science" -Enabled $true
@@ -519,55 +614,48 @@ function Show-InteractiveMenu {
                 }
                 Pause-Menu
             }
-            "4" {
+            3 {
                 if ($PluginDevInstalled) {
-                    $Resp = Read-Host "`nEl paquete 'plugin-dev' esta instalado (7 skills / ~1.200 tokens). Deseas DESINSTALARLO para liberar contexto? [S/n]"
+                    $Resp = Read-Host "`nEl paquete 'plugin-dev' esta habilitado (7 skills / ~1.200 tokens). Deseas DESACTIVARLO para liberar contexto? [S/n]"
                     if ($Resp -ne "n" -and $Resp -ne "N") {
                         Remove-TargetPluginOrSkill "plugin-dev"
                     }
                 } else {
-                    $Resp = Read-Host "`nDeseas INSTALAR 'plugin-dev' (herramientas para crear plugins de Claude)? [s/N]"
+                    $Resp = Read-Host "`nDeseas HABILITAR / INSTALAR 'plugin-dev' (herramientas para crear plugins de Claude)? [s/N]"
                     if ($Resp -eq "s" -or $Resp -eq "S") {
                         $script:IncludeList += "plugin-dev"
-                        Write-Host "Se incluira 'plugin-dev' en la sincronizacion..." -ForegroundColor Green
+                        Update-PluginConfigEntry -PluginName "plugin-dev" -Enabled $true
+                        Write-Host "Se habilitará 'plugin-dev' en la sincronizacion..." -ForegroundColor Green
                         return "Sync"
                     }
                 }
                 Pause-Menu
             }
-            "5" {
+            4 {
                 if ($TasteInstalled) {
-                    $Resp = Read-Host "`nEl plugin 'taste-skill' esta instalado (13 skills / ~1.800 tokens). Deseas DESINSTALARLO para liberar contexto? [S/n]"
+                    $Resp = Read-Host "`nEl plugin 'taste-skill' esta habilitado (13 skills / ~1.800 tokens). Deseas DESACTIVARLO para liberar contexto? [S/n]"
                     if ($Resp -ne "n" -and $Resp -ne "N") {
                         Remove-TargetPluginOrSkill "taste-skill"
                     }
                 } else {
-                    Write-Host "`nEl plugin taste-skill no esta instalado." -ForegroundColor Gray
+                    Write-Host "`nEl plugin taste-skill no esta activo." -ForegroundColor Gray
                 }
                 Pause-Menu
             }
-            "6" {
+            5 {
                 $script:CleanUnneeded = $true
                 return "Clean"
             }
-            "7" {
+            6 {
                 $Url = Read-Host "`nIntroduce la URL del repositorio Git del plugin"
                 if (-not [string]::IsNullOrWhiteSpace($Url)) {
                     $script:ExternalUrl = $Url.Trim()
                     return "External"
                 }
             }
-            "8" {
+            7 {
                 $script:All = $true
                 return "SyncAll"
-            }
-            "9" {
-                Write-Host "Operacion cancelada." -ForegroundColor Yellow
-                exit 0
-            }
-            default {
-                Write-Host "Opcion invalida. Presiona Enter para continuar..." -ForegroundColor Red
-                [void][Console]::ReadLine()
             }
         }
     } while ($true)

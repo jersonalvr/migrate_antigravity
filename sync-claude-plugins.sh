@@ -525,17 +525,98 @@ pause_menu() {
     read -r
 }
 
-show_interactive_menu() {
-    while true; do
+select_interactive_option() {
+    local -n _titles=$1
+    local -n _descs=$2
+    local selected="${3:-0}"
+    local total=${#_titles[@]}
+
+    # Check if stdin is a terminal
+    if [ ! -t 0 ]; then
         clear 2>/dev/null || echo ""
         echo "=========================================================="
         echo "     Antigravity Plugins & Skills Manager v1.5.0          "
         echo "=========================================================="
-        echo ""
-        echo "1) [SYNC]  Sincronización Estándar Optimizada (Recomendado)"
-        echo "   Instala plugins esenciales para desarrollo omitiendo redundantes y LSPs."
-        echo ""
-        
+        for i in "${!_titles[@]}"; do
+            echo "$((i+1))) ${_titles[$i]}"
+            if [ -n "${_descs[$i]}" ]; then
+                echo "      ${_descs[$i]}"
+            fi
+        done
+        echo "=========================================================="
+        read -p "Selecciona una opción [1-$total]: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$total" ]; then
+            SELECTED_INDEX=$((choice - 1))
+            return 0
+        fi
+        SELECTED_INDEX="$selected"
+        return 0
+    fi
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+
+    while true; do
+        clear 2>/dev/null || echo -e "\033[H\033[J"
+        echo "=========================================================="
+        echo "     Antigravity Plugins & Skills Manager v1.5.0          "
+        echo "=========================================================="
+        echo -e " Usa las flechas [↑/↓] para navegar y [Enter] para seleccionar.\n"
+
+        for i in "${!_titles[@]}"; do
+            local num=$((i + 1))
+            if [ "$i" -eq "$selected" ]; then
+                echo -e "\033[1;36m > $num) ${_titles[$i]}\033[0m"
+                if [ -n "${_descs[$i]}" ]; then
+                    echo -e "\033[0;33m      ${_descs[$i]}\033[0m"
+                fi
+            else
+                echo -e "   $num) ${_titles[$i]}"
+                if [ -n "${_descs[$i]}" ]; then
+                    echo -e "\033[0;90m      ${_descs[$i]}\033[0m"
+                fi
+            fi
+        done
+
+        echo -e "\n=========================================================="
+        echo -e " [Enter] Seleccionar   [1-$total] Atajo numérico   [Q/Esc] Salir"
+
+        # Read key
+        IFS= read -rsn1 key 2>/dev/null
+        if [ "$key" = $'\x1b' ]; then
+            read -rsn2 -t 0.1 seq 2>/dev/null
+            if [ "$seq" = "[A" ]; then
+                # Up arrow
+                selected=$(( (selected - 1 + total) % total ))
+            elif [ "$seq" = "[B" ]; then
+                # Down arrow
+                selected=$(( (selected + 1) % total ))
+            elif [ -z "$seq" ]; then
+                # Esc
+                tput cnorm 2>/dev/null || true
+                SELECTED_INDEX=-1
+                return 0
+            fi
+        elif [ -z "$key" ]; then
+            # Enter
+            tput cnorm 2>/dev/null || true
+            SELECTED_INDEX="$selected"
+            return 0
+        elif [ "$key" = "q" ] || [ "$key" = "Q" ]; then
+            tput cnorm 2>/dev/null || true
+            SELECTED_INDEX=-1
+            return 0
+        elif [[ "$key" =~ ^[1-9]$ ]] && [ "$key" -le "$total" ]; then
+            tput cnorm 2>/dev/null || true
+            SELECTED_INDEX=$((key - 1))
+            return 0
+        fi
+    done
+}
+
+show_interactive_menu() {
+    local current_idx=0
+    while true; do
         local legacy_skills_dir="$HOME/.gemini/antigravity/skills"
         local dupe_warning=""
         if [ -d "$legacy_skills_dir" ]; then
@@ -544,41 +625,55 @@ show_interactive_menu() {
                 dupe_warning=" -- AVISO: ($count skills legacy detectadas)"
             fi
         fi
-        echo "2) [SCAN]  Buscar y Resolver Skills Duplicadas$dupe_warning"
-        echo "   Detecta skills clonadas (~/.gemini/antigravity vs ~/.gemini/config) y libera tokens."
-        echo ""
 
         local sci_status="[DESACTIVADO]"
-        if [ -d "$PLUGINS_PATH/science" ]; then sci_status="[INSTALADO - 37 skills]"; fi
-        echo "3) [BIO]   Gestionar Plugins de Ciencia (DeepMind Science) $sci_status"
-        echo "   AlphaFold, ChemBL, PDB, Genomica (consume ~5.500 tokens de contexto)"
-        echo ""
+        if [ -d "$PLUGINS_PATH/science" ]; then sci_status="[HABILITADO - 37 skills]"; fi
 
         local pdev_status="[DESACTIVADO]"
-        if [ -d "$PLUGINS_PATH/plugin-dev" ]; then pdev_status="[INSTALADO - 7 skills]"; fi
-        echo "4) [DEV]   Gestionar Herramientas de Creación de Plugins (plugin-dev) $pdev_status"
-        echo "   Skills para crear plugins, hooks y commands de Claude (consume ~1.200 tokens)"
-        echo ""
+        if [ -d "$PLUGINS_PATH/plugin-dev" ]; then pdev_status="[HABILITADO - 7 skills]"; fi
 
         local taste_status="[DESACTIVADO]"
-        if [ -d "$PLUGINS_PATH/taste-skill" ] || [ -d "$SCRATCH_PATH/taste-skill" ]; then taste_status="[INSTALADO - 13 skills]"; fi
-        echo "5) [UI]    Gestionar Plugins de Frontend (taste-skill) $taste_status"
-        echo "   13 estilos de frontend (brutalist, minimalist, etc. - consume ~1.800 tokens)"
-        echo ""
+        if [ -d "$PLUGINS_PATH/taste-skill" ] || [ -d "$SCRATCH_PATH/taste-skill" ]; then taste_status="[HABILITADO - 13 skills]"; fi
 
-        echo "6) [CLEAN] Limpiar todos los plugins no esenciales (Liberar tokens inmediatamente)"
-        echo "7) [GIT]   Instalar Plugin Externo desde URL de Git (con SkillSpector)"
-        echo "8) [ALL]   Sincronizar TODO sin filtros (--all - instala todos los plugins oficiales)"
-        echo "9) [SALIR] Salir"
-        echo "=========================================================="
-        
-        read -p "Selecciona una opción [1-9]: " choice
-        case "$choice" in
-            1)
+        local menu_titles=(
+            "[SYNC]  Sincronización Estándar Optimizada (Recomendado)"
+            "[SCAN]  Buscar y Resolver Skills Duplicadas$dupe_warning"
+            "[BIO]   Gestionar Plugins de Ciencia (DeepMind Science) $sci_status"
+            "[DEV]   Gestionar Herramientas de Creación de Plugins (plugin-dev) $pdev_status"
+            "[UI]    Gestionar Plugins de Frontend (taste-skill) $taste_status"
+            "[CLEAN] Limpiar todos los plugins no esenciales (Liberar tokens inmediatamente)"
+            "[GIT]   Instalar Plugin Externo desde URL de Git (con SkillSpector)"
+            "[ALL]   Sincronizar TODO sin filtros (--all - instala todos los plugins oficiales)"
+            "[SALIR] Salir"
+        )
+
+        local menu_descs=(
+            "Instala plugins esenciales para desarrollo omitiendo redundantes y LSPs."
+            "Detecta skills clonadas (~/.gemini/antigravity vs ~/.gemini/config) y libera tokens."
+            "AlphaFold, ChemBL, PDB, Genomica (consume ~5.500 tokens de contexto)."
+            "Skills para crear plugins, hooks y commands de Claude (consume ~1.200 tokens)."
+            "13 estilos de frontend (brutalist, minimalist, etc. - consume ~1.800 tokens)."
+            "Desactiva en config.json plugins innecesarios y elimina carpetas residuales."
+            "Clona e instala un repositorio validando previamente la seguridad con NVIDIA SkillSpector."
+            "Instala toda la colección oficial sin exclusiones (puede exceder presupuesto)."
+            "Cerrar el gestor de plugins y regresar a la terminal."
+        )
+
+        select_interactive_option menu_titles menu_descs "$current_idx"
+        local choice_idx="$SELECTED_INDEX"
+
+        if [ "$choice_idx" -eq -1 ] || [ "$choice_idx" -eq 8 ]; then
+            echo -e "\nOperación cancelada."
+            exit 0
+        fi
+
+        current_idx="$choice_idx"
+        case "$choice_idx" in
+            0)
                 echo -e "\nIniciando sincronización optimizada..."
                 return 0
                 ;;
-            2)
+            1)
                 find_duplicate_skills false
                 read -p $'\n¿Deseas resolver automáticamente las duplicaciones eliminando copias redundantes? [S/n]: ' fix_resp
                 if [ "$fix_resp" != "n" ] && [ "$fix_resp" != "N" ]; then
@@ -586,28 +681,28 @@ show_interactive_menu() {
                 fi
                 pause_menu
                 ;;
-            3)
+            2)
                 if [ "$sci_status" != "[DESACTIVADO]" ]; then
-                    read -p $'\nEl paquete \'science\' está instalado. ¿Deseas DESINSTALARLO para liberar contexto? [S/n]: ' sci_resp
+                    read -p $'\nEl paquete \'science\' está habilitado. ¿Deseas DESACTIVARLO para liberar contexto? [S/n]: ' sci_resp
                     if [ "$sci_resp" != "n" ] && [ "$sci_resp" != "N" ]; then
                         remove_target_plugin_or_skill "science"
                     fi
                 else
-                    read -p $'\n¿Deseas INSTALAR el paquete \'science\' (DeepMind Science Skills - 37 skills)? [s/N]: ' sci_resp
+                    read -p $'\n¿Deseas HABILITAR / INSTALAR el paquete \'science\' (DeepMind Science Skills - 37 skills)? [s/N]: ' sci_resp
                     if [ "$sci_resp" = "s" ] || [ "$sci_resp" = "S" ]; then
                         install_science_skills
                     fi
                 fi
                 pause_menu
                 ;;
-            4)
+            3)
                 if [ "$pdev_status" != "[DESACTIVADO]" ]; then
-                    read -p $'\nEl paquete \'plugin-dev\' está instalado. ¿Deseas DESINSTALARLO para liberar contexto? [S/n]: ' pdev_resp
+                    read -p $'\nEl paquete \'plugin-dev\' está habilitado. ¿Deseas DESACTIVARLO para liberar contexto? [S/n]: ' pdev_resp
                     if [ "$pdev_resp" != "n" ] && [ "$pdev_resp" != "N" ]; then
                         remove_target_plugin_or_skill "plugin-dev"
                     fi
                 else
-                    read -p $'\n¿Deseas INSTALAR \'plugin-dev\' (herramientas para crear plugins de Claude)? [s/N]: ' pdev_resp
+                    read -p $'\n¿Deseas HABILITAR / INSTALAR \'plugin-dev\' (herramientas para crear plugins de Claude)? [s/N]: ' pdev_resp
                     if [ "$pdev_resp" = "s" ] || [ "$pdev_resp" = "S" ]; then
                         INCLUDE_PLUGINS+=("plugin-dev")
                         update_plugin_config_entry "plugin-dev" true
@@ -617,9 +712,9 @@ show_interactive_menu() {
                 fi
                 pause_menu
                 ;;
-            5)
+            4)
                 if [ "$taste_status" != "[DESACTIVADO]" ]; then
-                    read -p $'\nEl plugin \'taste-skill\' está instalado. ¿Deseas DESINSTALARLO para liberar contexto? [S/n]: ' taste_resp
+                    read -p $'\nEl plugin \'taste-skill\' está habilitado. ¿Deseas DESACTIVARLO para liberar contexto? [S/n]: ' taste_resp
                     if [ "$taste_resp" != "n" ] && [ "$taste_resp" != "N" ]; then
                         remove_target_plugin_or_skill "taste-skill"
                     fi
@@ -628,28 +723,20 @@ show_interactive_menu() {
                 fi
                 pause_menu
                 ;;
-            6)
+            5)
                 CLEAN_UNNEEDED=true
                 return 0
                 ;;
-            7)
+            6)
                 read -p $'\nIntroduce la URL del repositorio Git del plugin: ' ext_url
                 if [ -n "$ext_url" ]; then
                     EXTERNAL_URL=$(echo "$ext_url" | xargs)
                     return 0
                 fi
                 ;;
-            8)
+            7)
                 INSTALL_ALL=true
                 return 0
-                ;;
-            9)
-                echo "Operación cancelada."
-                exit 0
-                ;;
-            *)
-                echo "Opción inválida."
-                pause_menu
                 ;;
         esac
     done
