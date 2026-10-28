@@ -105,7 +105,34 @@ Esta carpeta también incluye herramientas para portar y sincronizar los plugins
 
 Puedes ejecutar los instaladores directamente sin necesidad de clonar previamente el repositorio.
 
-#### A. Sincronizar repositorio oficial de Claude (Optimizado para Antigravity)
+#### A. Menú Interactivo (Recomendado para Terminal)
+
+Si ejecutas el script directamente en una consola interactiva, se abrirá un menú intuitivo que te permite gestionar todas las opciones sin recordar parámetros:
+
+\\powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\sync-claude-plugins.ps1 -Interactive
+
+# macOS / Linux
+./sync-claude-plugins.sh --interactive
+\
+\\	ext
+==========================================================
+     Antigravity Plugins & Skills Manager v1.5.0          
+==========================================================
+
+1) [SYNC]  Sincronización Estándar Optimizada (Recomendado)
+2) [SCAN]  Buscar y Resolver Skills Duplicadas (Libera tokens)
+3) [BIO]   Gestionar Plugins de Ciencia (DeepMind Science - 37 skills)
+4) [DEV]   Gestionar Herramientas de Creación de Plugins (plugin-dev)
+5) [UI]    Gestionar Plugins de Frontend (taste-skill - 13 estilos)
+6) [CLEAN] Limpiar todos los plugins no esenciales (Liberar tokens)
+7) [GIT]   Instalar Plugin Externo desde URL de Git (con SkillSpector)
+8) [ALL]   Sincronizar TODO sin filtros (--all)
+9) [SALIR] Salir
+==========================================================
+\
+#### B. Sincronizar repositorio oficial de Claude (Optimizado para Antigravity)
 
 Por defecto, los scripts implementan **optimización inteligente de la ventana de contexto** (`Customization Token Budget`). Se instalan las herramientas esenciales de desarrollo (`feature-dev`, `code-review`, `code-simplifier`, `commit-commands`, `pr-review-toolkit`, `frontend-design`, `mcp-server-dev`, `hookify`, `playwright`, etc.) y **se omiten automáticamente los plugins redundantes o no esenciales**:
 * **LSPs de lenguajes (12 plugins):** `clangd`, `pyright`, `typescript-lsp`, `rust-analyzer`, etc. (*Antigravity IDE ya incluye soporte nativo integrado para estos lenguajes a través de su motor VS Code*).
@@ -123,6 +150,18 @@ Por defecto, los scripts implementan **optimización inteligente de la ventana d
 ```powershell
 # Sincronización estándar optimizada (Recomendada)
 irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1 | iex
+
+# Buscar skills duplicadas entre directorios de Antigravity:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -FindDuplicates
+
+# Resolver automáticamente duplicados eliminando copias redundantes:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -FixDuplicates
+
+# Instalar o habilitar el paquete de ciencias (DeepMind Science Skills):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -Science
+
+# Instalar o habilitar herramientas para crear plugins de Claude (plugin-dev):
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -PluginDev
 
 # Para incluir plugins específicos que normalmente se excluirían (ej: math-olympiad, pyright-lsp):
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.ps1))) -Include "math-olympiad,pyright-lsp"
@@ -142,6 +181,18 @@ irm https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-c
 ```bash
 # Sincronización estándar optimizada (Recomendada)
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash
+
+# Buscar skills duplicadas:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --find-duplicates
+
+# Resolver automáticamente duplicados:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --fix-duplicates
+
+# Instalar paquete de ciencias:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --science
+
+# Instalar plugin-dev:
+curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --plugin-dev
 
 # Para incluir plugins específicos que normalmente se excluirían:
 curl -sSf https://raw.githubusercontent.com/jersonalvr/migrate_antigravity/main/sync-claude-plugins.sh | bash -s -- --include "math-olympiad,pyright-lsp"
