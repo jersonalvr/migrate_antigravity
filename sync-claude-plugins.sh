@@ -308,6 +308,10 @@ config_file = sys.argv[1]
 all_flag = sys.argv[2] == "true"
 excluded = sys.argv[3].split(",")
 includes = [x.strip() for x in sys.argv[4].split(",") if x.strip()]
+plugins_dir = sys.argv[5]
+
+home = os.path.expanduser("~")
+market_dir = os.path.join(home, ".gemini", "antigravity", "cache", "marketplaces", "antigravity-plugins-official", "plugins")
 
 if not os.path.exists(config_file):
     sys.exit(0)
@@ -319,10 +323,18 @@ try:
     plugins = data.get("plugins", {})
     modified = False
     
-    for name, info in plugins.items():
+    for name in list(plugins.keys()):
+        in_plugins = os.path.exists(os.path.join(plugins_dir, name))
+        in_market = os.path.exists(os.path.join(market_dir, name))
+        if not (in_plugins or in_market):
+            del plugins[name]
+            modified = True
+            print(f"  [Eliminado de config.json] {name} (no existe en disco)")
+            continue
+
         if name in excluded and name not in includes and not all_flag:
-            if info.get("enabled", True) is not False:
-                info["enabled"] = False
+            if plugins[name].get("enabled", True) is not False:
+                plugins[name]["enabled"] = False
                 modified = True
                 print(f"  [Desactivado en config.json] {name}")
                 
@@ -332,7 +344,32 @@ try:
         print("Configuracion de plugins en config.json actualizada con exito.")
 except Exception:
     pass
-' "$config_file" "$INSTALL_ALL" "$(IFS=,; echo "${DEFAULT_EXCLUDED_PLUGINS[*]}")" "$(IFS=,; echo "${INCLUDE_PLUGINS[*]}")"
+' "$config_file" "$INSTALL_ALL" "$(IFS=,; echo "${DEFAULT_EXCLUDED_PLUGINS[*]}")" "$(IFS=,; echo "${INCLUDE_PLUGINS[*]}")" "$PLUGINS_PATH"
+}
+
+remove_plugin_config_entry() {
+    local plugin_name="$1"
+    local config_file="$HOME/.gemini/config/config.json"
+    [ ! -f "$config_file" ] && return 0
+
+    local py_cmd="python3"
+    command -v python3 >/dev/null 2>&1 || py_cmd="python"
+    if ! command -v "$py_cmd" >/dev/null 2>&1; then return 0; fi
+
+    "$py_cmd" -c '
+import sys, json, os
+config_file, name = sys.argv[1], sys.argv[2]
+try:
+    with open(config_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if "plugins" in data and name in data["plugins"]:
+        del data["plugins"][name]
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+        print(f"  Entrada {name} eliminada de config.json.")
+except Exception:
+    pass
+' "$config_file" "$plugin_name"
 }
 
 update_plugin_config_entry() {
@@ -403,11 +440,11 @@ remove_target_plugin_or_skill() {
         found=true
     fi
 
-    # 5. Disable in config.json
-    update_plugin_config_entry "$target" false
+    # 5. Remove entry from config.json
+    remove_plugin_config_entry "$target"
 
     if [ "$found" = false ]; then
-        log "⚠️ Plugin o skill '$target' desactivado en configuración."
+        log "⚠️ Plugin o skill '$target' desactivado/eliminado de configuración."
     fi
 }
 

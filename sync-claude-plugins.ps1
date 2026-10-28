@@ -219,8 +219,22 @@ function Update-AntigravityPluginConfig {
         
         if ($ConfigObj.plugins) {
             $Modified = $false
-            foreach ($Prop in $ConfigObj.plugins.PSObject.Properties) {
+            $Props = @($ConfigObj.plugins.PSObject.Properties)
+            $MarketplaceDir = Join-Path (Join-Path $Home ".gemini") "antigravity\cache\marketplaces\antigravity-plugins-official\plugins"
+
+            foreach ($Prop in $Props) {
                 $PName = $Prop.Name
+                $InPlugins = Test-Path (Join-Path $PluginsPath $PName)
+                $InMarket = Test-Path (Join-Path $MarketplaceDir $PName)
+
+                # Si el plugin no existe en disco, eliminar la entrada de config.json
+                if (-not $InPlugins -and -not $InMarket) {
+                    $ConfigObj.plugins.PSObject.Properties.Remove($PName)
+                    $Modified = $true
+                    Write-Log "  [Eliminado de config.json] $PName (no existe en disco)" -Color DarkGray
+                    continue
+                }
+
                 # If plugin is in excluded list and not explicitly included or all
                 if ($DefaultExcludedPlugins -contains $PName -and ($IncludeList -notcontains $PName) -and -not $All) {
                     if ($Prop.Value.enabled -ne $false) {
@@ -239,6 +253,25 @@ function Update-AntigravityPluginConfig {
         }
     } catch {
         Write-Log "Aviso: No se pudo actualizar config.json: $_" -Color DarkGray
+    }
+}
+
+function Remove-PluginConfigEntry([string]$PluginName) {
+    $ConfigJsonPath = Join-Path (Join-Path $Home ".gemini") "config\config.json"
+    if (-not (Test-Path $ConfigJsonPath)) { return }
+
+    try {
+        $ConfigRaw = [System.IO.File]::ReadAllText($ConfigJsonPath, [System.Text.Encoding]::UTF8)
+        $ConfigObj = $ConfigRaw | ConvertFrom-Json
+        
+        if ($ConfigObj.plugins -and $ConfigObj.plugins.PSObject.Properties[$PluginName]) {
+            $ConfigObj.plugins.PSObject.Properties.Remove($PluginName)
+            $NewJson = $ConfigObj | ConvertTo-Json -Depth 10
+            [System.IO.File]::WriteAllText($ConfigJsonPath, $NewJson, [System.Text.Encoding]::UTF8)
+            Write-Log "  Entrada '$PluginName' eliminada de config.json." -Color Green
+        }
+    } catch {
+        Write-Log "Aviso: Error al eliminar '$PluginName' en config.json: $_" -Color DarkGray
     }
 }
 
@@ -308,11 +341,11 @@ function Remove-TargetPluginOrSkill([string]$Target) {
         $Found = $true
     }
 
-    # 5. Disable in Antigravity config.json
-    Update-PluginConfigEntry -PluginName $Target -Enabled $false
+    # 5. Remove entry from Antigravity config.json
+    Remove-PluginConfigEntry -PluginName $Target
 
     if (-not $Found) {
-        Write-Log "Plugin o skill '$Target' desactivado en config.json." -Color Yellow
+        Write-Log "Plugin o skill '$Target' desactivado/eliminado de config.json." -Color Yellow
     }
 }
 
